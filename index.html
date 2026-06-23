@@ -672,6 +672,8 @@ function migrate(){
   if(!DB.perfil){DB.perfil={nome:'',empresa:''};changed=true}
   if(!DB.log){DB.log=[];changed=true}
   if(!DB.metas){DB.metas={leads:0,fechamentos:0,mrr:0};changed=true}
+  if(!DB.operacoes){DB.operacoes=[];changed=true}
+  (DB.clients||[]).forEach(c=>{if(c.status==='Implantação'&&ensureOperacao(c))changed=true});
   if(changed)save();
 }
 async function save(){
@@ -1275,6 +1277,13 @@ function filterClient(btn,f){btn.parentNode.querySelectorAll('button').forEach(b
 
 /* ============================== OPERAÇÕES ============================== */
 const OST={'Não iniciado':'mut','Em andamento':'info','Concluído':'pos','Aguardando cliente':'warn'};
+const CHECKLIST_PADRAO=['Diagnóstico comercial','Configuração CRM','Treinamento de equipe','Estruturação de funil','Scripts comerciais','Dashboard','WhatsApp Business','Processo CRC','Processo de No Show'];
+function ensureOperacao(c){
+  if(!c||DB.operacoes.some(o=>o.cliente===c.empresa))return false;
+  DB.operacoes.push({id:uid(),cliente:c.empresa,responsavel:c.responsavel||'',inicio:daysAgo(0),previsao:daysAhead(30),status:'Em andamento',
+    checklist:CHECKLIST_PADRAO.map(nm=>({nome:nm,done:false}))});
+  return true;
+}
 function viewOperacoes(v){
   const ops=vOperacoes();
   if(!ops.length){v.innerHTML=emptyState('ops','Nenhuma implantação','As implantações aparecem aqui com checklist e progresso. Cada uma tem um responsável e só ele (e o CEO) a vê.','Cadastrar cliente','openClientForm()');return;}
@@ -1326,12 +1335,16 @@ function openOp(id){
     </div>`);
 }
 function setOpStatus(id,s){const o=DB.operacoes.find(x=>x.id===id);o.status=s;save();render();openOp(id);toast('Status atualizado')}
+function opComplete(o){const c=DB.clients.find(x=>x.empresa===o.cliente);
+  if(c&&c.status==='Implantação'){c.status='Ativo';clientLog(c,'Status','Implantação concluída — cliente ativado');
+    logEvent('Operações','Implantação concluída: '+c.empresa+' → Ativo',o.responsavel);toast('Implantação concluída — '+c.empresa+' agora é Ativo');}
+  else toast('Implantação concluída');}
 function toggleCheckDrawer(id,i){const o=DB.operacoes.find(x=>x.id===id);o.checklist[i].done=!o.checklist[i].done;
-  const allDone=o.checklist.every(c=>c.done);if(allDone)o.status='Concluído';else if(o.status==='Concluído')o.status='Em andamento';
-  save();render();openOp(id)}
+  const allDone=o.checklist.every(c=>c.done);const was=o.status;if(allDone)o.status='Concluído';else if(o.status==='Concluído')o.status='Em andamento';
+  if(allDone&&was!=='Concluído')opComplete(o);save();render();openOp(id)}
 function toggleCheck(id,i){const o=DB.operacoes.find(x=>x.id===id);o.checklist[i].done=!o.checklist[i].done;
-  const allDone=o.checklist.every(c=>c.done);if(allDone)o.status='Concluído';else if(o.status==='Concluído')o.status='Em andamento';
-  save();render()}
+  const allDone=o.checklist.every(c=>c.done);const was=o.status;if(allDone)o.status='Concluído';else if(o.status==='Concluído')o.status='Em andamento';
+  if(allDone&&was!=='Concluído')opComplete(o);save();render()}
 
 /* ============================== FINANCEIRO ============================== */
 let finFilter={mode:'geral',month:monthKey(daysAgo(0)),from:daysAgo(30),to:daysAgo(0)};
@@ -1775,6 +1788,7 @@ function setClientStatus(id,status){const c=DB.clients.find(x=>x.id===id);if(c.s
     return;
   }
   c.status=status;clientLog(c,'Status','Status alterado para '+status);logEvent('Clientes',c.empresa+': status → '+status,c.responsavel);
+  if(status==='Implantação'&&ensureOperacao(c)){logEvent('Operações','Implantação iniciada: '+c.empresa,c.responsavel);}
   save();render();renderClientDrawer(id);toast('Status atualizado')}
 function saveClientNota(id,val){const c=DB.clients.find(x=>x.id===id);c.nota=val;save();toast('Nota salva')}
 function tagsEditorHTML(kind,id,tags){
@@ -1908,6 +1922,8 @@ function openClientForm(){
         contrato:{implantacao:0,mensal:men,fechamento:0,assinatura:daysAgo(0),vencimento:daysAhead(365),fidelidadeMeses:fid,link:''},
         nota:'',tags:[],
         historico:[{ts:nowISO(),data:daysAgo(0),tipo:'Contrato',texto:'Cliente cadastrado no CRM.'}]});
+      const novo=DB.clients[0];
+      if(novo.status==='Implantação'){ensureOperacao(novo);logEvent('Operações','Implantação iniciada: '+novo.empresa,novo.responsavel);}
       logEvent('Clientes','Cadastrou o cliente "'+emp+'"',resp);save();render();toast('Cliente cadastrado')});
 }
 function openAgendaForm(){
