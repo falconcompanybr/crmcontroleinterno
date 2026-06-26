@@ -527,7 +527,7 @@ function sampleData(){
     telefone:'(21) 9'+(7000+i*211).toString().slice(0,4)+'-'+(2000+i*9),
     responsavel:UNIVERSAL_STAGES.includes(l[1])?'':reps[i%reps.length],ultimaInteracao:daysAgo(i%9),stageSince:daysAgo((i*2)%14),
     proximaTarefa:i%3===0?'Ligar para follow-up':i%3===1?'Enviar proposta':'Confirmar reunião',
-    atividade:[{ts:daysAgo(i%9)+'T10:30:00',tipo:'etapa',texto:'Entrou na etapa "'+STAGES.find(s=>s[0]===l[1])[1]+'"',autor:reps[i%reps.length]}]
+    atividade:[{ts:daysAgo(i%9)+'T10:30:00',tipo:'etapa',texto:'Entrou na etapa "'+(STAGES.find(s=>s[0]===l[1])||['','—'])[1]+'"',autor:reps[i%reps.length]}]
   }));
   const tarefas=[
     ['Ligar para Clínica Vida Nova','Lead novo do Instagram, fazer primeiro contato.','Marina Costa',daysAgo(1),'Alta','Clínica Vida Nova','Atrasada'],
@@ -626,7 +626,7 @@ let fdb=null, docRef=null, persistMode='memory'; // firebase | local | memory
 function emptyDB(){
   return {clients:[],leads:[],tarefas:[],reunioes:[],agenda:[],operacoes:[],
     contasReceber:[],contasPagar:[],equipe:[],log:[],
-    perfil:{nome:'',empresa:''},metas:{leads:0,fechamentos:0,mrr:0},
+    perfil:{nome:'',empresa:''},metas:{leads:0,fechamentos:0,mrr:0},metasFech:{},painel:{},
     series:{months:['Jan','Fev','Mar','Abr','Mai','Jun'],faturamento:[0,0,0,0,0,0],mrr:[0,0,0,0,0,0],clientes:[0,0,0,0,0,0],lucro:[0,0,0,0,0,0]},
     saldoAjuste:0};
 }
@@ -700,6 +700,9 @@ function migrate(){
   if(!DB.log){DB.log=[];changed=true}
   if(!DB.metas){DB.metas={leads:0,fechamentos:0,mrr:0};changed=true}
   if(!DB.operacoes){DB.operacoes=[];changed=true}
+  if(!DB.metasFech){DB.metasFech={};changed=true}
+  if(!DB.painel){DB.painel={};changed=true}
+  if(Array.isArray(DB.leads)){const cl0=DB.leads.filter(l=>l.stage==='fechados');if(cl0.length){cl0.forEach(l=>{DB.clients.unshift(leadToClient(l,{status:'Ativo',closedAt:l.stageSince||l.criado||daysAgo(0),closedValue:l.valor||0,implantacao:0,mensal:0}));});DB.leads=DB.leads.filter(l=>l.stage!=='fechados');changed=true;}}
   (DB.clients||[]).forEach(c=>{if(c.status==='Implantação'&&ensureOperacao(c))changed=true});
   if(changed)save();
 }
@@ -743,11 +746,13 @@ function metrics(){
   const ltv=ticket*18; // assumindo retenção média de 18 meses
   const saldo=recebida-despPagas+(DB.saldoAjuste||0);
   const saldoProj=saldo+aberta-despFut;
-  // funnel
+  // funnel — "fechados" agora é cliente fechado no mês (closedAt)
+  const cm=monthKey(daysAgo(0));
+  const fech=cl.filter(c=>c.closedAt&&monthKey(c.closedAt)===cm).length;
   const st=s=>LE.filter(l=>l.stage===s).length;
-  const novos=st('novos'), agend=st('agend')+st('conf')+st('compar')+st('prop')+st('fechados');
-  const compar=st('compar')+st('prop')+st('fechados'), fech=st('fechados');
-  const totalLeads=LE.filter(l=>l.stage!=='perdidos'&&l.stage!=='reativ').length;
+  const novos=st('novos'), agend=st('agend')+st('conf')+st('compar')+st('prop');
+  const compar=st('compar')+st('prop');
+  const totalLeads=LE.filter(l=>l.stage!=='perdidos'&&l.stage!=='reativ').length+fech;
   const txConv=totalLeads?fech/totalLeads*100:0;
   const txCompar=agend?compar/agend*100:0;
   const txFech=compar?fech/compar*100:0;
@@ -777,8 +782,10 @@ const NAV=[
   ['financeiro','Financeiro','money','Caixa, MRR e cobranças'],
   ['relatorio','Relatório','report','Movimentação entre as abas'],
   ['equipe','Equipe','team','Usuários e permissões'],
+  ['painel','Meu Painel','user','Seu acompanhamento pessoal'],
 ];
-function allowedNav(){const p=curPerms();return NAV.filter(n=>p[n[0]])}
+const SEARCH_PH={pipeline:'Buscar lead...',clientes:'Buscar cliente...',tarefas:'Buscar tarefa...',agenda:'Buscar compromisso...',reunioes:'Buscar reunião...',operacoes:'Buscar implantação...',financeiro:'Buscar lançamento...',equipe:'Buscar pessoa...',painel:'Buscar cliente ou lead...'};
+function allowedNav(){const p=curPerms();return NAV.filter(n=>n[0]==='painel'?true:p[n[0]])}
 function renderNav(){
   const p=curPerms();
   const badges={tarefas:vTarefas().filter(t=>t.status==='Atrasada').length,
@@ -806,6 +813,7 @@ function render(){
   const n=NAV.find(x=>x[0]===route);
   document.getElementById('pageTitle').textContent=n[1];
   document.getElementById('pageSub').textContent=n[3];
+  {const gs=document.getElementById('globalSearch');if(gs)gs.placeholder=SEARCH_PH[route]||'Buscar cliente ou lead...';}
   const ta=document.getElementById('topAction');
   if(TOP_ACTION[route]&&curPerms()[route]){ta.style.display='inline-flex';ta.className='btn btn-acc';
     ta.innerHTML=ic('plus')+TOP_ACTION[route][0];ta.setAttribute('onclick',TOP_ACTION[route][1]);}
@@ -814,7 +822,7 @@ function render(){
   const v=document.getElementById('view');
   ({dashboard:viewDashboard,pipeline:viewPipeline,agenda:viewAgenda,tarefas:viewTarefas,
     reunioes:viewReunioes,clientes:viewClientes,operacoes:viewOperacoes,financeiro:viewFinanceiro,
-    relatorio:viewRelatorio,equipe:viewEquipe}[route])(v);
+    relatorio:viewRelatorio,equipe:viewEquipe,painel:viewPainel}[route])(v);
 }
 function renderChrome(){
   const empresa=(DB&&DB.perfil&&DB.perfil.empresa)?DB.perfil.empresa:'Falcon';
@@ -831,17 +839,47 @@ function doSearch(q){
   const box=document.getElementById('searchResults');if(!box)return;
   q=(q||'').trim().toLowerCase();
   if(!q){box.style.display='none';return;}
-  const cls=vClients().filter(c=>c.empresa.toLowerCase().includes(q)||(c.contato||'').toLowerCase().includes(q)).slice(0,6);
-  const lds=vLeads().filter(l=>l.nome.toLowerCase().includes(q)).slice(0,6);
-  if(!cls.length&&!lds.length){box.innerHTML='<div style="padding:14px;color:var(--muted);font-size:13px">Nada encontrado.</div>';box.style.display='block';return;}
-  const row=(ic_,nome,sub,onclick,color)=>`<div onclick="${onclick}" style="display:flex;align-items:center;gap:10px;padding:10px 13px;cursor:pointer;border-bottom:1px solid var(--surface-3)" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background=''">
-    <div class="logo" style="width:30px;height:30px;border-radius:8px;font-size:12px;background:${color}">${initials(nome)}</div>
+  const has=x=>(x||'').toLowerCase().includes(q);
+  const hide="document.getElementById('searchResults').style.display='none';document.getElementById('globalSearch').value=''";
+  const row=(nome,sub,onclick,color)=>`<div onclick="${onclick}" style="display:flex;align-items:center;gap:10px;padding:10px 13px;cursor:pointer;border-bottom:1px solid var(--surface-3)" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background=''">
+    <div class="logo" style="width:30px;height:30px;border-radius:8px;font-size:12px;background:${color}">${initials(nome||'?')}</div>
     <div style="min-width:0"><div style="font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${nome}</div><div style="font-size:11.5px;color:var(--muted)">${sub}</div></div></div>`;
-  let h='';
-  if(cls.length){h+='<div style="padding:7px 13px 4px;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-2);font-weight:600">Clientes</div>';
-    h+=cls.map(c=>row('client',c.empresa,c.contato||c.cidade,`go('clientes');setTimeout(()=>openClient('${c.id}'),60);document.getElementById('searchResults').style.display='none';document.getElementById('globalSearch').value=''`,colorFor(c.empresa))).join('');}
-  if(lds.length){h+='<div style="padding:7px 13px 4px;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-2);font-weight:600">Leads</div>';
-    h+=lds.map(l=>row('pipe',l.nome,STAGES.find(s=>s[0]===l.stage)[1],`go('pipeline');setTimeout(()=>openLead('${l.id}'),60);document.getElementById('searchResults').style.display='none';document.getElementById('globalSearch').value=''`,colorFor(l.nome))).join('');}
+  let h='', any=false;
+  const sec=t=>{h+='<div style="padding:7px 13px 4px;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-2);font-weight:600">'+t+'</div>';};
+  const stageLbl=st=>(STAGES.find(x=>x[0]===st)||['','—'])[1];
+  if(route==='pipeline'){
+    const ls=vLeads().filter(l=>has(l.nome)).slice(0,8);
+    if(ls.length){any=true;sec('Leads');h+=ls.map(l=>row(l.nome,stageLbl(l.stage),`go('pipeline');setTimeout(()=>openLead('${l.id}'),60);${hide}`,colorFor(l.nome))).join('');}
+  } else if(route==='clientes'){
+    const cs=vClients().filter(c=>has(c.empresa)||has(c.contato)).slice(0,8);
+    if(cs.length){any=true;sec('Clientes');h+=cs.map(c=>row(c.empresa,c.contato||c.cidade,`go('clientes');setTimeout(()=>openClient('${c.id}'),60);${hide}`,colorFor(c.empresa))).join('');}
+  } else if(route==='tarefas'){
+    const ts=vTarefas().filter(t=>has(t.titulo)||has(t.cliente)).slice(0,8);
+    if(ts.length){any=true;sec('Tarefas');h+=ts.map(t=>row(t.titulo,(t.cliente||'—')+' • '+t.status,`go('tarefas');setTimeout(()=>openTask('${t.id}'),60);${hide}`,'#2D6BE0')).join('');}
+  } else if(route==='agenda'){
+    const as=vAgenda().filter(a=>has(a.cliente)||has(a.obs)||has(a.tipo)).slice(0,8);
+    if(as.length){any=true;sec('Agenda');h+=as.map(a=>row(a.cliente,a.tipo+' • '+fmtDate(a.data)+' '+a.hora,`go('agenda');${hide}`,'#8B5CF6')).join('');}
+  } else if(route==='reunioes'){
+    const rs=vReunioes().filter(r=>has(r.titulo)||has(r.cliente)||has(r.participantes)).slice(0,8);
+    if(rs.length){any=true;sec('Reuniões');h+=rs.map(r=>row(r.cliente,r.titulo,`go('reunioes');${hide}`,colorFor(r.cliente||'?'))).join('');}
+  } else if(route==='operacoes'){
+    const os=vOperacoes().filter(o=>has(o.cliente)).slice(0,8);
+    if(os.length){any=true;sec('Implantações');h+=os.map(o=>row(o.cliente,o.status,`go('operacoes');setTimeout(()=>openOp('${o.id}'),60);${hide}`,colorFor(o.cliente))).join('');}
+  } else if(route==='financeiro'){
+    const fr=vContasReceber().filter(c=>has(c.cliente)).slice(0,5);
+    const fp=vContasPagar().filter(c=>has(c.descricao)||has(c.categoria)).slice(0,5);
+    if(fr.length){any=true;sec('A receber');h+=fr.map(c=>row(c.cliente,BRL(c.valor)+' • '+c.status,`go('financeiro');${hide}`,'#0E9D6B')).join('');}
+    if(fp.length){any=true;sec('A pagar');h+=fp.map(c=>row(c.descricao,c.categoria+' • '+BRL(c.valor),`go('financeiro');${hide}`,'#DD3A2F')).join('');}
+  } else if(route==='equipe'){
+    const es=(DB.equipe||[]).filter(e=>has(e.nome)||has(e.email)).slice(0,8);
+    if(es.length){any=true;sec('Equipe');h+=es.map(e=>row(e.nome,e.email||roleLabel(e.perfil),`go('equipe');setTimeout(()=>openUser('${e.id}'),60);${hide}`,'#475569')).join('');}
+  } else {
+    const cs=vClients().filter(c=>has(c.empresa)||has(c.contato)).slice(0,5);
+    const ls=vLeads().filter(l=>has(l.nome)).slice(0,5);
+    if(cs.length){any=true;sec('Clientes');h+=cs.map(c=>row(c.empresa,c.contato||c.cidade,`go('clientes');setTimeout(()=>openClient('${c.id}'),60);${hide}`,colorFor(c.empresa))).join('');}
+    if(ls.length){any=true;sec('Leads');h+=ls.map(l=>row(l.nome,stageLbl(l.stage),`go('pipeline');setTimeout(()=>openLead('${l.id}'),60);${hide}`,colorFor(l.nome))).join('');}
+  }
+  if(!any){box.innerHTML='<div style="padding:14px;color:var(--muted);font-size:13px">Nada encontrado nesta aba.</div>';box.style.display='block';return;}
   box.innerHTML=h;box.style.display='block';
 }
 
@@ -922,7 +960,7 @@ function meuDiaHTML(){
   const tHoje=vTarefas().filter(t=>t.status!=='Concluída'&&t.prazo===hoje).length;
   const tAtras=vTarefas().filter(t=>t.status==='Atrasada'||(t.status!=='Concluída'&&t.prazo<hoje)).length;
   const cHoje=vAgenda().filter(a=>a.data===hoje).length;
-  const parados=vLeads().filter(l=>!['perdidos','fechados'].includes(l.stage)&&daysInStage(l)>=14).length;
+  const parados=vLeads().filter(l=>l.stage!=='perdidos'&&daysInStage(l)>=14).length;
   const card=(cor,icone,num,lbl,sub,onclick)=>`<div onclick="${onclick}" style="flex:1;min-width:150px;cursor:pointer;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;box-shadow:var(--shadow);display:flex;align-items:center;gap:12px">
     <div style="width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:${cor}1a;color:${cor}">${ic(icone)}</div>
     <div><div class="mono-num" style="font-size:21px;font-weight:600;color:var(--ink);line-height:1">${num}</div><div style="font-size:11.5px;color:var(--muted);margin-top:2px">${lbl}</div></div>
@@ -943,7 +981,7 @@ function metasHTML(m){
       <button class="btn btn-acc btn-sm" onclick="openMetas()">${ic('plus')}Definir metas</button></div>`:'';}
   const cm=monthKey(daysAgo(0));
   const leadsMes=vLeads().filter(l=>monthKey(l.criado||l.stageSince)===cm).length;
-  const fechMes=vLeads().filter(l=>l.stage==='fechados'&&monthKey(l.stageSince)===cm).length;
+  const fechMes=vClients().filter(c=>c.closedAt&&monthKey(c.closedAt)===cm).length;
   const bar=(lbl,val,goal,fmt)=>{const p=goal?Math.min(100,Math.round(val/goal*100)):0;const c=p>=100?'#0E9D6B':p>=60?'#F5B301':'#2D6BE0';
     return `<div style="flex:1;min-width:200px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
       <span style="color:var(--muted);font-weight:500">${lbl}</span><span class="mono-num" style="font-weight:600">${fmt(val)} / ${fmt(goal)} <span style="color:${c}">(${p}%)</span></span></div>
@@ -976,8 +1014,8 @@ function kpi(lbl,val,icon,foot,delta,hl,neg){
 function funnelHTML(m){
   const LE=vLeads();
   const rows=[
-    ['Novos leads',LE.filter(l=>l.stage==='novos').length+LE.filter(l=>l.stage==='resgatado').length+LE.filter(l=>['atend','qual','agend','conf','compar','prop','fechados'].includes(l.stage)).length,100],
-    ['Agendados',m.agend,null],['Compareceram',m.compar,null],['Proposta',LE.filter(l=>['prop','fechados'].includes(l.stage)).length,null],['Fechados',m.fech,null],
+    ['Novos leads',LE.filter(l=>l.stage==='novos').length+LE.filter(l=>l.stage==='resgatado').length+LE.filter(l=>['atend','qual','agend','conf','compar','prop'].includes(l.stage)).length,100],
+    ['Agendados',m.agend,null],['Compareceram',m.compar,null],['Proposta',LE.filter(l=>['prop'].includes(l.stage)).length,null],['Fechados',m.fech,null],
   ];
   const total0=rows[0][1];
   const max=total0||1;
@@ -1003,7 +1041,7 @@ function buildAlerts(m){
   const atras=vTarefas().filter(t=>t.status==='Atrasada').length;
   if(atras)A.push(['warn','clock',`${atras} tarefa(s) atrasada(s)`,'Toque para ver as tarefas em aberto.',"goTask('Atrasada')"]);
   if(vLeads().length && m.txCompar<70)A.push(['warn','down','Comparecimento abaixo da meta',`Taxa atual em ${pct(m.txCompar)} (meta 70%).`,"go('pipeline')"]);
-  const parados=vLeads().filter(l=>!['perdidos','fechados'].includes(l.stage)&&daysInStage(l)>=14).length;
+  const parados=vLeads().filter(l=>l.stage!=='perdidos'&&daysInStage(l)>=14).length;
   if(parados)A.push(['warn','clock',`${parados} lead(s) parado(s) há +14 dias`,'Toque para revisar o pipeline.',"go('pipeline')"]);
   vClients().filter(c=>c.status==='Ativo'||c.status==='Implantação').forEach(c=>{
     const venc=c.contrato&&c.contrato.vencimento;const dv=venc?Math.round((new Date(venc)-today)/864e5):999;
@@ -1057,17 +1095,18 @@ function chartOpts(money,dual){
 const STAGES=[
   ['novos','Novos Leads','#64748B'],['resgatado','Resgatados','#0EA5A5'],['atend','Em Atendimento','#2D6BE0'],['qual','Qualificados','#0891B2'],
   ['agend','Agendados','#8B5CF6'],['conf','Confirmados','#7C3AED'],['compar','Compareceram','#0E9D6B'],
-  ['prop','Proposta','#E08A12'],['fechados','Fechados','#0A7A52'],['perdidos','Perdidos','#DD3A2F'],['reativ','Reativação','#DB2777'],
+  ['prop','Proposta','#E08A12'],['perdidos','Perdidos','#DD3A2F'],['reativ','Reativação','#DB2777'],
 ];
 function viewPipeline(v){
   const vis=vLeads();
   const total=vis.reduce((s,l)=>s+l.valor,0);
-  const open=vis.filter(l=>!['fechados','perdidos'].includes(l.stage)).reduce((s,l)=>s+l.valor,0);
+  const open=vis.filter(l=>l.stage!=='perdidos').reduce((s,l)=>s+l.valor,0);
+  const fechMes=vClients().filter(c=>c.closedAt&&monthKey(c.closedAt)===monthKey(daysAgo(0))).length;
   v.innerHTML=`
     <div style="display:flex;gap:14px;margin-bottom:14px;flex-wrap:wrap">
       ${miniStat('Leads no pipeline',vis.length)}
       ${miniStat('Valor em aberto',BRL(open))}
-      ${miniStat('Fechados',vis.filter(l=>l.stage==='fechados').length)}
+      ${miniStat('Fechados no mês',fechMes)}
       ${miniStat('Valor total',BRL(total))}
     </div>
     <div style="font-size:12px;color:var(--muted);margin:0 2px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1103,6 +1142,7 @@ function leadCard(l){
     <div class="lf"><span class="mini-ava" title="${l.responsavel||'Sem responsável'}">${l.responsavel?initials(l.responsavel):'—'}</span><span class="val">${BRL(l.valor)}</span></div>
     ${canRescue?`<button class="btn btn-sm btn-acc" style="width:100%;margin-top:9px;justify-content:center" onclick="event.stopPropagation();rescueLead('${l.id}')">${ic('hand')}Resgatar</button>`:''}
     ${owned?`<button class="btn btn-sm" style="width:100%;margin-top:9px;justify-content:center" onclick="event.stopPropagation();releaseLead('${l.id}')">${ic('unlock')}Soltar lead</button>`:''}
+    ${(!['perdidos','reativ'].includes(l.stage))?`<button class="btn btn-sm" style="width:100%;margin-top:9px;justify-content:center;background:var(--pos);border-color:var(--pos);color:#fff" onclick="event.stopPropagation();fecharNegocio('${l.id}')">${ic('check')}Fechar negócio</button>`:''}
   </div>`;
 }
 function rescueLead(id){
@@ -1383,6 +1423,11 @@ function toggleCheck(id,i){const o=DB.operacoes.find(x=>x.id===id);o.checklist[i
   if(allDone&&was!=='Concluído')opComplete(o);save();render()}
 
 /* ============================== FINANCEIRO ============================== */
+let finView='movimento';
+let finFech={month:monthKey(daysAgo(0))};
+function finToggleHTML(){return `<div class="seg" style="margin-bottom:14px">
+  <button class="${finView==='movimento'?'on':''}" onclick="finView='movimento';render()">Movimentação</button>
+  <button class="${finView==='fechamento'?'on':''}" onclick="finView='fechamento';render()">Fechamento</button></div>`;}
 let finFilter={mode:'geral',month:monthKey(daysAgo(0)),from:daysAgo(30),to:daysAgo(0)};
 function finInRange(venc){
   if(finFilter.mode==='geral')return true;
@@ -1416,7 +1461,110 @@ function finLabel(){
   if(finFilter.mode==='mensal')return 'Mês de '+monthLabel(finFilter.month);
   return fmtDate(finFilter.from)+' a '+fmtDate(finFilter.to);
 }
+/* ============================== MEU PAINEL ============================== */
+let painelPeriod='semanal';
+let painelUserId=null;
+function painelUser(){const id=painelUserId||(curUser()&&curUser().id);return (DB.equipe||[]).find(e=>e.id===id)||curUser();}
+function painelData(uid){DB.painel=DB.painel||{};if(!DB.painel[uid])DB.painel[uid]={metas:{ligacoes:0,mensagens:0,fechados:0},registros:[],diario:[]};const p=DB.painel[uid];p.metas=p.metas||{ligacoes:0,mensagens:0,fechados:0};p.registros=p.registros||[];p.diario=p.diario||[];return p;}
+function painelInWindow(ts){const d=(ts||'').slice(0,10);if(!d)return false;
+  if(painelPeriod==='diario')return d===daysAgo(0);
+  if(painelPeriod==='semanal')return d>=daysAgo(7);
+  return monthKey(d)===monthKey(daysAgo(0));}
+function viewPainel(v){
+  const u=painelUser();
+  if(!u){v.innerHTML=emptyState('user','Painel pessoal','Faça login para acompanhar suas metas, tarefas e diário.','',null);return;}
+  const pd=painelData(u.id);
+  const me=curUser();
+  const canEdit=(me&&u.id===me.id)||canSeeAll();
+  const periodLbl={diario:'Hoje',semanal:'Últimos 7 dias',mensal:'Este mês'}[painelPeriod];
+  const ligas=pd.registros.filter(r=>r.tipo==='ligacao'&&painelInWindow(r.ts)).length;
+  const msgs=pd.registros.filter(r=>r.tipo==='mensagem'&&painelInWindow(r.ts)).length;
+  const fechs=(DB.clients||[]).filter(c=>c.closedAt&&c.responsavel===u.nome&&painelInWindow(c.closedAt)).length;
+  const sel=canSeeAll()?`<select onchange="painelUserId=this.value;render()" style="padding:8px 11px;border:1px solid var(--border-2);border-radius:9px;font-family:inherit;font-size:13px">
+      ${(DB.equipe||[]).filter(e=>e.ativo!==false).map(e=>`<option value="${e.id}" ${e.id===u.id?'selected':''}>${e.nome}</option>`).join('')}</select>`:'';
+  const bar=(lbl,val,goal)=>{const p=goal?Math.min(100,Math.round(val/goal*100)):0;const c=p>=100?'#0E9D6B':p>=60?'#F5B301':'#2D6BE0';
+    return `<div style="flex:1;min-width:180px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span style="color:var(--muted);font-weight:500">${lbl}</span><span class="mono-num" style="font-weight:600">${val} / ${goal} <span style="color:${c}">(${p}%)</span></span></div><div style="height:9px;background:var(--surface-3);border-radius:9px;overflow:hidden"><i style="display:block;height:100%;width:${p}%;background:${c};border-radius:9px"></i></div></div>`;};
+  const tasks=(DB.tarefas||[]).filter(t=>t.responsavel===u.nome).sort((a,b)=>(a.prazo||'').localeCompare(b.prazo||''));
+  const tasksList=tasks.length?tasks.map(t=>`<div class="li"><div class="check ${t.status==='Concluída'?'done':''}">${ic('check')}</div><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13.5px;${t.status==='Concluída'?'color:var(--muted-2);text-decoration:line-through':''}">${t.titulo}</div><div style="font-size:12px;color:var(--muted)">${t.cliente||'—'} • ${fmtDate(t.prazo)}</div></div><span class="chip chip-${PRIO[t.prioridade]||'mut'}">${t.prioridade}</span></div>`).join(''):'<div class="empty" style="padding:20px">'+ic('task')+'<div>Nenhuma tarefa atribuída a você.</div></div>';
+  const diario=pd.diario.filter(d=>painelInWindow(d.ts)).sort((a,b)=>(b.ts||'').localeCompare(a.ts||''));
+  v.innerHTML=`
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <div class="seg">
+        <button class="${painelPeriod==='diario'?'on':''}" onclick="painelPeriod='diario';render()">Diário</button>
+        <button class="${painelPeriod==='semanal'?'on':''}" onclick="painelPeriod='semanal';render()">Semanal</button>
+        <button class="${painelPeriod==='mensal'?'on':''}" onclick="painelPeriod='mensal';render()">Mensal</button>
+      </div>
+      ${sel}
+      <span class="chip chip-mut" style="margin-left:auto">${u.nome} • ${periodLbl}</span>
+    </div>
+    <div class="sec-title">Minhas metas ${canEdit?`<button class="btn btn-sm btn-ghost" style="margin-left:auto" onclick="openPainelMetas('${u.id}')">${ic('edit')}Editar metas</button>`:''}</div>
+    <div class="card" style="padding:18px;display:flex;gap:26px;flex-wrap:wrap">
+      ${bar('Ligações',ligas,pd.metas.ligacoes||0)}
+      ${bar('Mensagens p/ lead novo',msgs,pd.metas.mensagens||0)}
+      ${bar('Clientes fechados',fechs,pd.metas.fechados||0)}
+    </div>
+    ${canEdit?`<div style="display:flex;gap:9px;margin-top:14px;flex-wrap:wrap">
+      <button class="btn btn-acc" onclick="painelAddReg('${u.id}','ligacao')">${ic('phone')}+1 ligação</button>
+      <button class="btn" onclick="painelAddReg('${u.id}','mensagem')">${ic('wa')}+1 mensagem</button></div>`:''}
+    <div class="sec-title">Minhas tarefas</div>
+    <div class="card"><div class="list">${tasksList}</div></div>
+    <div class="sec-title">Diário</div>
+    ${canEdit?`<div class="card" style="padding:14px;margin-bottom:14px"><div style="display:flex;gap:8px">
+      <input id="diario_txt" placeholder="O que você fez / aprendeu hoje?" style="flex:1;padding:9px 11px;border:1px solid var(--border-2);border-radius:9px;font-family:inherit;font-size:13px" onkeydown="if(event.key==='Enter')painelAddDiario('${u.id}')">
+      <button class="btn btn-acc btn-sm" onclick="painelAddDiario('${u.id}')">Adicionar</button></div></div>`:''}
+    <div class="card"><div class="list">${diario.length?diario.map(d=>`<div class="li"><div style="flex:1;min-width:0"><div style="font-size:13.5px;color:var(--ink);line-height:1.5">${d.texto}</div><div style="font-size:11.5px;color:var(--muted);margin-top:3px">${fmtDT(d.ts)}</div></div></div>`).join(''):'<div class="empty" style="padding:20px">'+ic('doc')+'<div>Nenhum registro no período.</div></div>'}</div></div>`;
+}
+function painelAddReg(uid,tipo){const pd=painelData(uid);pd.registros.unshift({ts:nowISO(),tipo:tipo});save();render();toast(tipo==='ligacao'?'Ligação registrada':'Mensagem registrada');}
+function painelAddDiario(uid){const i=document.getElementById('diario_txt');const t=(i&&i.value||'').trim();if(!t)return;const pd=painelData(uid);pd.diario.unshift({ts:nowISO(),texto:t});save();render();toast('Anotação adicionada');}
+function openPainelMetas(uid){const pd=painelData(uid);const m=pd.metas||{};
+  openModal('Metas pessoais',`
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Valem para o período selecionado no painel (diário / semanal / mensal).</div>
+    <div class="field"><label>Meta de ligações</label><input id="pm_lig" type="number" value="${m.ligacoes||0}"></div>
+    <div class="field"><label>Meta de mensagens p/ lead novo</label><input id="pm_msg" type="number" value="${m.mensagens||0}"></div>
+    <div class="field"><label>Meta de clientes fechados</label><input id="pm_fec" type="number" value="${m.fechados||0}"></div>`,
+    ()=>{pd.metas={ligacoes:Number(document.getElementById('pm_lig').value||0),mensagens:Number(document.getElementById('pm_msg').value||0),fechados:Number(document.getElementById('pm_fec').value||0)};save();render();toast('Metas salvas');});
+}
+function viewFechamento(v){
+  const mk=finFech.month;
+  const closed=vClients().filter(c=>c.closedAt&&monthKey(c.closedAt)===mk).sort((a,b)=>(b.closedAt||'').localeCompare(a.closedAt||''));
+  const qtd=closed.length, valor=closed.reduce((s,c)=>s+(c.closedValue||0),0);
+  const meta=(DB.metasFech&&DB.metasFech[mk])||{qtd:0,valor:0};
+  const monthOpts=finMonths().map(k=>`<option value="${k}" ${k===mk?'selected':''}>${monthLabel(k)}</option>`).join('');
+  const bar=(lbl,val,goal,fmt)=>{const p=goal?Math.min(100,Math.round(val/goal*100)):0;const c=p>=100?'#0E9D6B':p>=60?'#F5B301':'#2D6BE0';
+    return `<div style="flex:1;min-width:200px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span style="color:var(--muted);font-weight:500">${lbl}</span><span class="mono-num" style="font-weight:600">${fmt(val)} / ${fmt(goal)} <span style="color:${c}">(${p}%)</span></span></div><div style="height:9px;background:var(--surface-3);border-radius:9px;overflow:hidden"><i style="display:block;height:100%;width:${p}%;background:${c};border-radius:9px"></i></div></div>`;};
+  v.innerHTML=`${finToggleHTML()}
+    <div class="card" style="padding:13px 16px;margin-bottom:18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span style="font-size:12.5px;color:var(--muted);font-weight:600">Mês de fechamento</span>
+      <select onchange="finFech.month=this.value;render()" style="padding:8px 11px;border:1px solid var(--border-2);border-radius:9px;font-family:inherit;font-size:13px">${monthOpts}</select>
+      <span class="chip chip-mut" style="margin-left:auto">Só novos contratos do mês — mensalidades antigas não entram aqui</span>
+      ${canSeeAll()?`<button class="btn btn-sm" onclick="openMetaFech('${mk}')">${ic('edit')}Editar meta</button>`:''}
+    </div>
+    <div class="kpis" style="grid-template-columns:repeat(2,1fr)">
+      ${kpi('Novos contratos no mês',qtd,'fire','Fechamentos de '+monthLabel(mk),null)}
+      ${kpi('Valor dos novos contratos',BRL(valor),'money','Implantação + 1ª mensalidade',null,true)}
+    </div>
+    <div class="sec-title">Meta de novos contratos — ${monthLabel(mk)}</div>
+    <div class="card" style="padding:18px;display:flex;gap:26px;flex-wrap:wrap">
+      ${bar('Qtd. de contratos',qtd,meta.qtd||0,x=>x)}
+      ${bar('Valor fechado',valor,meta.valor||0,x=>BRLk(x))}
+    </div>
+    <div class="sec-title">Contratos fechados em ${monthLabel(mk)}</div>
+    <div class="card tw"><table><thead><tr><th>Cliente</th><th>Responsável</th><th>Data</th><th>Valor do contrato</th></tr></thead>
+      <tbody>${closed.length?closed.map(c=>`<tr style="cursor:pointer" onclick="openClient('${c.id}')"><td style="font-weight:550">${c.empresa}</td><td>${c.responsavel||'—'}</td><td class="tnum">${fmtDate(c.closedAt)}</td><td class="mono-num" style="font-weight:600">${BRL(c.closedValue||0)}</td></tr>`).join('')
+        :'<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:22px">Nenhum contrato fechado neste mês.</td></tr>'}</tbody>
+      ${closed.length?`<tfoot><tr style="border-top:2px solid var(--border)"><td colspan="3" style="font-weight:600;color:var(--muted)">Total (${qtd})</td><td class="mono-num" style="font-weight:700">${BRL(valor)}</td></tr></tfoot>`:''}</table></div>`;
+}
+function openMetaFech(mk){
+  const meta=(DB.metasFech&&DB.metasFech[mk])||{qtd:0,valor:0};
+  openModal('Meta de novos contratos — '+monthLabel(mk),`
+    <div class="field"><label>Meta de quantidade de contratos</label><input id="mf_qtd" type="number" value="${meta.qtd||0}"></div>
+    <div class="field"><label>Meta de valor fechado (R$)</label><input id="mf_val" type="number" value="${meta.valor||0}"></div>
+    <div style="font-size:12px;color:var(--muted)">Vale apenas para ${monthLabel(mk)}. Cada mês tem sua própria meta.</div>`,
+    ()=>{DB.metasFech=DB.metasFech||{};DB.metasFech[mk]={qtd:Number(document.getElementById('mf_qtd').value||0),valor:Number(document.getElementById('mf_val').value||0)};
+      save();render();toast('Meta de fechamento salva');});
+}
 function viewFinanceiro(v){
+  if(finView==='fechamento'){return viewFechamento(v);}
   const m=finMetrics();
   const curM=monthKey(daysAgo(0));
   const novoMRR=vClients().filter(c=>(c.status==='Ativo'||c.status==='Implantação')&&monthKey(c.entrada)===curM).reduce((s,c)=>s+c.contrato.mensal,0);
@@ -1424,6 +1572,7 @@ function viewFinanceiro(v){
   const catTotals={};m.cp.forEach(c=>{catTotals[c.categoria]=(catTotals[c.categoria]||0)+c.valor});
   const monthOpts=finMonths().map(k=>`<option value="${k}" ${k===finFilter.month?'selected':''}>${monthLabel(k)}</option>`).join('');
   v.innerHTML=`
+    ${finToggleHTML()}
     <div class="card" style="padding:13px 16px;margin-bottom:18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <div class="seg">
         <button class="${finFilter.mode==='geral'?'on':''}" onclick="setFinMode('geral')">Geral</button>
@@ -1661,6 +1810,7 @@ function openLead(id){
         <select id="leadStage" style="width:100%;margin-top:7px;padding:9px 11px;border:1px solid var(--border-2);border-radius:9px;font-family:inherit;font-size:13px"
           onchange="moveLead('${l.id}',this.value)">
           ${STAGES.map(s=>`<option value="${s[0]}" ${s[0]===l.stage?'selected':''}>${s[1]}</option>`).join('')}</select></div>
+      ${(!['perdidos','reativ'].includes(l.stage))?`<button class="btn" style="width:100%;margin:14px 0 0;justify-content:center;background:var(--pos);border-color:var(--pos);color:#fff" onclick="fecharNegocio('${l.id}')">${ic('check')}Fechar negócio (vira Cliente + Operação)</button>`:''}
       ${l.stage==='perdidos'&&l.motivoPerda?`<div style="margin-top:12px;padding:10px 13px;background:var(--neg-soft);border-radius:10px;font-size:12.5px;color:#B62B22"><b>Motivo da perda:</b> ${l.motivoPerda}</div>`:''}
       <div style="margin-top:16px"><label style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted-2);font-weight:600">Etiquetas</label>
         ${tagsEditorHTML('lead',l.id,l.tags||[])}</div>
@@ -1687,6 +1837,39 @@ function moveLeadTo(id,stage,reopen){
   const l=DB.leads.find(x=>x.id===id);if(!l||l.stage===stage)return;
   if(stage==='perdidos'){promptMotivoPerda(l,()=>commitLeadStage(l,stage,false));return;}
   commitLeadStage(l,stage,reopen);
+}
+function leadToClient(l,opts){
+  opts=opts||{};
+  const closedAt=opts.closedAt||daysAgo(0);
+  const implant=opts.implantacao||0, mensal=opts.mensal||0;
+  const closedValue=(opts.closedValue!=null)?opts.closedValue:(implant+mensal);
+  const hist=(l.atividade||[]).map(a=>({ts:a.ts,data:(a.ts||'').slice(0,10),tipo:'Pipeline',texto:a.texto}));
+  hist.unshift({ts:nowISO(),data:closedAt,tipo:'Fechamento',texto:'Negócio fechado'+(closedValue?(' — '+BRL(closedValue)):'')+' e movido do pipeline para Clientes.'});
+  return {id:uid(),empresa:l.nome,contato:'—',responsavel:l.responsavel||'',
+    telefone:l.telefone||'',whatsapp:l.telefone||'',email:'',cidade:'—',especialidade:'—',
+    origem:l.origem||'',entrada:closedAt,status:opts.status||'Implantação',saude:60,
+    closedAt:closedAt,closedValue:closedValue,
+    contrato:{implantacao:implant,mensal:mensal,fechamento:closedValue,assinatura:closedAt,vencimento:daysAhead(365),fidelidadeMeses:0,link:''},
+    nota:'',tags:l.tags||[],historico:hist};
+}
+function fecharNegocio(id){
+  const l=DB.leads.find(x=>x.id===id);if(!l)return;
+  openModal('Fechar negócio \u{1F389}',`
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.5">Confirme os valores do contrato fechado com <b>${l.nome}</b>. O lead sai do pipeline e vira <b>Cliente</b> + <b>Operação</b>, levando todo o histórico de etapas junto.</div>
+    <div class="frow2"><div class="field"><label>Valor de implantação (R$)</label><input id="fn_imp" type="number" value="0"></div>
+      <div class="field"><label>Valor mensal (R$)</label><input id="fn_men" type="number" value="${l.valor||0}"></div></div>`,
+    ()=>{
+      const imp=Number(document.getElementById('fn_imp').value||0);
+      const men=Number(document.getElementById('fn_men').value||0);
+      const cli=leadToClient(l,{status:'Implantação',implantacao:imp,mensal:men,closedValue:imp+men,closedAt:daysAgo(0)});
+      DB.clients.unshift(cli);
+      DB.leads=DB.leads.filter(x=>x.id!==id);
+      ensureOperacao(cli);
+      logEvent('Pipeline','Fechou negócio: "'+l.nome+'"'+((imp+men)?(' ('+BRL(imp+men)+')'):''),cli.responsavel);
+      logEvent('Clientes','Novo cliente por fechamento: '+cli.empresa,cli.responsavel);
+      logEvent('Operações','Implantação iniciada: '+cli.empresa,cli.responsavel);
+      save();go('clientes');setTimeout(()=>openClient(cli.id),60);toast('Negócio fechado! Cliente e operação criados.');
+    },'Fechar negócio \u2713');
 }
 function commitLeadStage(l,stage,reopen){
   const from=STAGES.find(s=>s[0]===l.stage)[1];const to=STAGES.find(s=>s[0]===stage)[1];
@@ -2056,8 +2239,8 @@ function desempenhoHTML(){
   const linhas=users.map(u=>{
     const meus=DB.leads.filter(l=>l.responsavel===u.nome);
     const leadsTrab=meus.filter(l=>relInPeriod(l.criado||l.stageSince)).length;
-    const fechs=meus.filter(l=>l.stage==='fechados'&&relInPeriod(l.stageSince));
-    const valor=fechs.reduce((s,l)=>s+l.valor,0);
+    const fechs=DB.clients.filter(c=>c.closedAt&&c.responsavel===u.nome&&relInPeriod(c.closedAt));
+    const valor=fechs.reduce((s,c)=>s+(c.closedValue||0),0);
     const com=valor*(u.comissaoPct||0)/100;
     return {nome:u.nome,perfil:u.perfil,leadsTrab,fech:fechs.length,valor,pct:u.comissaoPct||0,com};
   }).sort((a,b)=>b.valor-a.valor);
@@ -2071,7 +2254,8 @@ function desempenhoHTML(){
 }
 function origemHTML(){
   const leads=vLeads();const map={};
-  leads.forEach(l=>{const o=l.origem||'—';map[o]=map[o]||{total:0,fech:0};map[o].total++;if(l.stage==='fechados')map[o].fech++;});
+  leads.forEach(l=>{const o=l.origem||'—';map[o]=map[o]||{total:0,fech:0};map[o].total++;});
+  vClients().filter(c=>c.closedAt).forEach(c=>{const o=c.origem||'—';map[o]=map[o]||{total:0,fech:0};map[o].total++;map[o].fech++;});
   const ent=Object.entries(map).sort((a,b)=>b[1].total-a[1].total);
   if(!ent.length)return '';
   const max=Math.max(...ent.map(e=>e[1].total));
