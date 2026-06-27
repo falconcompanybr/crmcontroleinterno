@@ -2582,6 +2582,7 @@ function openSetup(){
   try{applyTheme(localStorage.getItem('falcon_theme')||'light')}catch(e){applyTheme('light')}
   await initPersistence();
   await load();
+  if(DB&&DB.contasPagar){DB.contasPagar=DB.contasPagar.filter(x=>!(x.descricao&&x.descricao.indexOf('GESTÃO ESTAÇÃO DO DENTE')>-1));await save();}
   try{session=localStorage.getItem('falcon_session')||null}catch(e){session=null}
   updateConnUI();
   if(loggedIn()) render(); else renderAuth();
