@@ -2340,6 +2340,58 @@
           decisoes:document.getElementById('m_dec').value||'—',proximos:document.getElementById('m_prox').value||'—'});
         logEvent('Reuniões','Registrou a reunião "'+tit+'"',resp);save();render();toast('Reunião registrada')});
   }
+    /* ---- Detalhe / edição de reunião ---- */
+  function openMeet(id){
+    const r=DB.reunioes.find(x=>x.id===id); if(!r)return;
+    const L='font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted-2);font-weight:600';
+    openDrawer(`<div class="dw-h">
+        <div class="logo" style="background:${colorFor(r.cliente||'?')};width:44px;height:44px;border-radius:12px;font-size:16px">${initials(r.cliente||'?')}</div>
+        <div style="flex:1"><h3 style="font-size:17px">${r.titulo}</h3>
+          <div style="font-size:12.5px;color:var(--muted);margin-top:2px">${r.cliente||'—'} • ${fmtDate(r.data)}</div></div>
+        <button class="x" onclick="closeOverlays()">${ic('x')}</button></div>
+      <div class="dw-b">
+        <div class="meta">
+          <div class="m"><label>Cliente</label><div>${r.cliente||'—'}</div></div>
+          <div class="m"><label>Data</label><div>${fmtDate(r.data)}</div></div>
+          <div class="m"><label>Responsável</label><div>${r.responsavel||'—'}</div></div>
+          <div class="m"><label>Participantes</label><div>${r.participantes||'—'}</div></div>
+        </div>
+        <div style="margin-top:16px"><label style="${L}">Resumo</label>
+          <div style="margin-top:6px;font-size:13.5px;line-height:1.5">${r.resumo||'—'}</div></div>
+        <div style="margin-top:16px"><label style="${L}">Decisões</label>
+          <div style="margin-top:6px;font-size:13.5px;line-height:1.5">${r.decisoes||'—'}</div></div>
+        <div style="margin-top:16px"><label style="${L}">Próximos passos</label>
+          <div style="margin-top:6px;font-size:13.5px;line-height:1.5">${r.proximos||'—'}</div></div>
+        <div style="margin-top:22px;padding-top:16px;border-top:1px solid var(--surface-3);display:flex;gap:9px">
+          <button class="btn btn-pri" style="flex:1;justify-content:center" onclick="openMeetEdit('${r.id}')">${ic('edit')}Editar</button>
+          <button class="btn" style="color:var(--neg);border-color:var(--neg-soft)" onclick="deleteMeet('${r.id}')">${ic('trash')}Excluir</button></div>
+      </div>`);
+  }
+  function openMeetEdit(id){
+    const r=DB.reunioes.find(x=>x.id===id); if(!r)return;
+    openModal('Editar reunião',`
+      <div class="field"><label>Título</label><input id="m_tit" value="${(r.titulo||'').replace(/"/g,'&quot;')}"></div>
+      <div class="frow2"><div class="field"><label>Cliente</label><select id="m_cli"><option value="">—</option>${DB.clients.map(c=>`<option ${c.empresa===r.cliente?'selected':''}>${c.empresa}</option>`).join('')}</select></div>
+        <div class="field"><label>Responsável</label><select id="m_resp">${repOptions(r.responsavel)}</select></div></div>
+      <div class="field"><label>Data</label><input id="m_data" type="date" value="${r.data}"></div>
+      <div class="field"><label>Participantes</label><input id="m_part" value="${(r.participantes||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Resumo</label><textarea id="m_res">${r.resumo||''}</textarea></div>
+      <div class="field"><label>Decisões tomadas</label><input id="m_dec" value="${(r.decisoes||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Próximos passos</label><input id="m_prox" value="${(r.proximos||'').replace(/"/g,'&quot;')}"></div>`,
+      ()=>{const tit=document.getElementById('m_tit').value.trim();if(!tit)return;
+        Object.assign(r,{titulo:tit,cliente:document.getElementById('m_cli').value||'—',responsavel:document.getElementById('m_resp').value,
+          data:document.getElementById('m_data').value,participantes:document.getElementById('m_part').value||r.responsavel,
+          resumo:document.getElementById('m_res').value||'—',decisoes:document.getElementById('m_dec').value||'—',proximos:document.getElementById('m_prox').value||'—'});
+        logEvent('Reuniões','Editou a reunião "'+tit+'"',r.responsavel);save();render();toast('Reunião atualizada');
+      },'Salvar alterações');
+  }
+  function deleteMeet(id){
+    const r=DB.reunioes.find(x=>x.id===id); if(!r)return;
+    if(!confirm('Excluir a reunião "'+r.titulo+'"?'))return;
+    DB.reunioes=DB.reunioes.filter(x=>x.id!==id);
+    logEvent('Reuniões','Excluiu a reunião "'+r.titulo+'"',r.responsavel);
+    save();closeOverlays();render();toast('Reunião excluída');
+  }
   
   /* ============================== AUTH (login por usuário) ============================== */
   function renderAuth(){
