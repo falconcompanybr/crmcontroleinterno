@@ -1708,7 +1708,7 @@ function viewFinanceiro(v){
     <div class="sec-title">Contas a receber <button class="btn btn-sm" style="margin-left:auto" onclick="openContaForm('receber')">${ic('plus')}Lançar</button></div>
     <div class="card tw"><table><thead><tr><th>Cliente</th><th>Valor</th><th>Vencimento</th><th>Status</th><th></th></tr></thead>
       <tbody>${m.cr.length?[...m.cr].sort((a,b)=>a.vencimento.localeCompare(b.vencimento)).map(c=>`
-        <tr><td style="font-weight:550">${c.cliente}</td><td class="mono-num" style="font-weight:600">${BRL(c.valor)}</td>
+        <tr><td style="font-weight:550">${c.cliente}${c.recorrencia?` <span class="chip chip-info" style="font-size:10px;padding:1px 6px" title="Repete: ${({semanal:'toda semana',mensal:'todo mês',anual:'todo ano'})[c.recorrencia]||''}">↻</span>`:''}${c.comentario?`<div style="font-size:11.5px;color:var(--muted);font-weight:400;margin-top:2px">${c.comentario}</div>`:''}</td><td class="mono-num" style="font-weight:600">${BRL(c.valor)}</td>
           <td class="tnum">${fmtDate(c.vencimento)}</td><td>${crStatus(c.status)}</td>
           <td style="text-align:right;white-space:nowrap">
             ${c.status!=='Pago'?`<button class="btn btn-sm" onclick="markPaid('${c.id}')">${ic('check')}Receber</button>`:''}
@@ -1719,7 +1719,7 @@ function viewFinanceiro(v){
     <div class="sec-title">Contas a pagar <button class="btn btn-sm" style="margin-left:auto" onclick="openContaForm('pagar')">${ic('plus')}Lançar</button></div>
     <div class="card tw"><table><thead><tr><th>Descrição</th><th>Categoria</th><th>Valor</th><th>Vencimento</th><th>Status</th><th></th></tr></thead>
       <tbody>${m.cp.length?[...m.cp].sort((a,b)=>a.vencimento.localeCompare(b.vencimento)).map(c=>`
-        <tr><td style="font-weight:550">${c.descricao}</td><td><span class="chip chip-mut">${c.categoria}</span></td>
+        <tr><td style="font-weight:550">${c.descricao}${c.recorrencia?` <span class="chip chip-info" style="font-size:10px;padding:1px 6px" title="Repete: ${({semanal:'toda semana',mensal:'todo mês',anual:'todo ano'})[c.recorrencia]||''}">↻</span>`:''}${c.comentario?`<div style="font-size:11.5px;color:var(--muted);font-weight:400;margin-top:2px">${c.comentario}</div>`:''}</td><td><span class="chip chip-mut">${c.categoria}</span></td>
           <td class="mono-num" style="font-weight:600">${BRL(c.valor)}</td><td class="tnum">${fmtDate(c.vencimento)}</td><td>${crStatus(c.status)}</td>
           <td style="text-align:right;white-space:nowrap">
             <button class="btn btn-sm" onclick="togglePagar('${c.id}')">${c.status==='Pago'?'Reabrir':ic('check')+'Pagar'}</button>
@@ -1732,38 +1732,75 @@ function projRow(l,val,c){return `<div style="display:flex;justify-content:space
 function crStatus(s){return `<span class="st" style="color:${{Pago:'#0E9D6B',Aberto:'#2D6BE0',Atrasado:'#DD3A2F',Cancelado:'#5E6B7E'}[s]}">${s}</span>`}
 function markPaid(id){let c=DB.contasReceber.find(x=>x.id===id);c.status='Pago';save();render();toast('Pagamento recebido')}
 function togglePagar(id){let c=DB.contasPagar.find(x=>x.id===id);c.status=c.status==='Pago'?'Aberto':'Pago';save();render();toast(c.status==='Pago'?'Conta paga':'Conta reaberta')}
-function openContaForm(tipo,id){
+
+  function openContaForm(tipo,id){
   const isR=tipo==='receber';
   const list=isR?DB.contasReceber:DB.contasPagar;
   const c=id?list.find(x=>x.id===id):null;
   const cats=['Tráfego pago','Ferramentas','Funcionários','Comissões','Impostos','Outros'];
+  const recAtual=(c&&c.recorrencia)?c.recorrencia:'nenhuma';
+  const recorBlock=`
+    <div class="frow2"><div class="field"><label>Recorrência</label>
+      <select id="k_recor" onchange="document.getElementById('k_recwrap').style.display=this.value==='nenhuma'?'none':'block'">
+        <option value="nenhuma" ${recAtual==='nenhuma'?'selected':''}>Não recorrente</option>
+        <option value="semanal" ${recAtual==='semanal'?'selected':''}>Toda semana</option>
+        <option value="mensal" ${recAtual==='mensal'?'selected':''}>Todo mês</option>
+        <option value="anual" ${recAtual==='anual'?'selected':''}>Todo ano</option></select></div>
+      <div class="field" id="k_recwrap" style="display:${recAtual==='nenhuma'?'none':'block'}">
+        <label>Repetir quantas vezes</label><input id="k_recn" type="number" min="2" value="12"></div></div>
+    <div style="font-size:11.5px;color:var(--muted-2);margin:-4px 0 12px;line-height:1.4">${c?'Para gerar novas repetições, crie uma conta nova com recorrência.':'Cria automaticamente os próximos lançamentos, avançando a data de vencimento.'}</div>`;
+  const comentBlock=`<div class="field"><label>Comentário (opcional)</label><textarea id="k_obs" placeholder="Observação sobre este lançamento">${c&&c.comentario?c.comentario:''}</textarea></div>`;
   const body=isR?`
     <div class="field"><label>Cliente</label><input id="k_cli" list="cliList" value="${c?c.cliente:''}" placeholder="Nome do cliente">
       <datalist id="cliList">${DB.clients.map(x=>`<option value="${x.empresa}">`).join('')}</datalist></div>
     <div class="frow2"><div class="field"><label>Valor (R$)</label><input id="k_val" type="number" value="${c?c.valor:''}" placeholder="1490"></div>
       <div class="field"><label>Vencimento</label><input id="k_venc" type="date" value="${c?c.vencimento:daysAhead(5)}"></div></div>
-    <div class="field"><label>Status</label><select id="k_st">${['Aberto','Pago','Atrasado','Cancelado'].map(s=>`<option ${c&&c.status===s?'selected':''}>${s}</option>`).join('')}</select></div>`
+    <div class="field"><label>Status</label><select id="k_st">${['Aberto','Pago','Atrasado','Cancelado'].map(s=>`<option ${c&&c.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+    ${recorBlock}${comentBlock}`
     :`
     <div class="field"><label>Descrição</label><input id="k_desc" value="${c?c.descricao:''}" placeholder="Ex.: Tráfego pago — Meta Ads"></div>
     <div class="frow2"><div class="field"><label>Categoria</label><select id="k_cat">${cats.map(s=>`<option ${c&&c.categoria===s?'selected':''}>${s}</option>`).join('')}</select></div>
       <div class="field"><label>Valor (R$)</label><input id="k_val" type="number" value="${c?c.valor:''}" placeholder="1200"></div></div>
     <div class="frow2"><div class="field"><label>Vencimento</label><input id="k_venc" type="date" value="${c?c.vencimento:daysAhead(5)}"></div>
-      <div class="field"><label>Status</label><select id="k_st">${['Aberto','Pago','Atrasado','Cancelado'].map(s=>`<option ${c&&c.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>`;
+      <div class="field"><label>Status</label><select id="k_st">${['Aberto','Pago','Atrasado','Cancelado'].map(s=>`<option ${c&&c.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
+    ${recorBlock}${comentBlock}`;
   const delBtn=c?`<button class="btn btn-sm" style="margin-right:auto;color:var(--neg);border-color:var(--neg-soft)" onclick="deleteConta('${tipo}','${id}')">${ic('trash')}Excluir</button>`:'';
   openModal(id?'Editar conta':'Nova conta a '+tipo,body,()=>{
+    const proxData=(s,t,k)=>{const d=new Date(s);if(t==='semanal')d.setDate(d.getDate()+7*k);else if(t==='anual')d.setFullYear(d.getFullYear()+k);else d.setMonth(d.getMonth()+k);return d.toISOString().slice(0,10)};
     const val=Number(document.getElementById('k_val').value||0);
     const venc=document.getElementById('k_venc').value, st=document.getElementById('k_st').value;
-    if(isR){const cli=document.getElementById('k_cli').value.trim()||'—';
-      if(c){Object.assign(c,{cliente:cli,valor:val,vencimento:venc,status:st});}
-      else DB.contasReceber.push({id:uid(),cliente:cli,valor:val,vencimento:venc,status:st});
-    }else{const desc=document.getElementById('k_desc').value.trim()||'—',cat=document.getElementById('k_cat').value;
-      if(c){Object.assign(c,{descricao:desc,categoria:cat,valor:val,vencimento:venc,status:st});}
-      else DB.contasPagar.push({id:uid(),descricao:desc,categoria:cat,valor:val,vencimento:venc,status:st});
+    const obs=(document.getElementById('k_obs').value||'').trim();
+    const recor=document.getElementById('k_recor').value;
+    const recn=Math.max(2,Number(document.getElementById('k_recn').value||0));
+    const base=isR
+      ?{cliente:(document.getElementById('k_cli').value.trim()||'—')}
+      :{descricao:(document.getElementById('k_desc').value.trim()||'—'),categoria:document.getElementById('k_cat').value};
+    if(c){
+      Object.assign(c,base,{valor:val,vencimento:venc,status:st,comentario:obs,recorrencia:recor==='nenhuma'?'':recor});
+      save();render();toast('Conta atualizada');
+    }else if(recor!=='nenhuma'){
+      const grupo=uid();
+      for(let k=0;k<recn;k++){
+        const row=Object.assign({id:uid()},base,{valor:val,vencimento:proxData(venc,recor,k),status:k===0?st:'Aberto',comentario:obs,recorrencia:recor,recorrenciaGrupo:grupo});
+        (isR?DB.contasReceber:DB.contasPagar).push(row);
+      }
+      save();render();toast(recn+' lançamentos recorrentes criados');
+    }else{
+      const row=Object.assign({id:uid()},base,{valor:val,vencimento:venc,status:st,comentario:obs,recorrencia:''});
+      (isR?DB.contasReceber:DB.contasPagar).push(row);
+      save();render();toast('Conta lançada');
     }
-    save();render();toast(id?'Conta atualizada':'Conta lançada');
   },id?'Salvar alterações':'Lançar',delBtn);
 }
 function deleteConta(tipo,id){const key=tipo==='receber'?'contasReceber':'contasPagar';
+  const c=DB[key].find(x=>x.id===id);
+  if(c&&c.recorrenciaGrupo){
+    const fut=DB[key].filter(x=>x.recorrenciaGrupo===c.recorrenciaGrupo&&x.vencimento>=c.vencimento&&x.id!==id).length;
+    if(fut>0&&confirm('Esta conta é recorrente. Excluir também as '+fut+' repetição(ões) seguinte(s)?\n\nOK = excluir todas as futuras • Cancelar = só esta')){
+      DB[key]=DB[key].filter(x=>!(x.recorrenciaGrupo===c.recorrenciaGrupo&&x.vencimento>=c.vencimento));
+      save();render();closeOverlays();toast('Recorrência excluída');return;
+    }
+  }
   DB[key]=DB[key].filter(x=>x.id!==id);save();render();closeOverlays();toast('Conta excluída')}
 function adjustSaldo(){
   openModal('Ajustar saldo',`<div class="field"><label>Valor do ajuste (R$)</label><input id="adj" type="number" placeholder="Ex.: 500 ou -300" value="0"></div>
