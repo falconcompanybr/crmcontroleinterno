@@ -1780,11 +1780,9 @@ function togglePagar(id){let c=DB.contasPagar.find(x=>x.id===id);c.status=c.stat
       save();render();toast('Conta atualizada');
     }else if(recor!=='nenhuma'){
       const grupo=uid();
-      for(let k=0;k<recn;k++){
-        const row=Object.assign({id:uid()},base,{valor:val,vencimento:proxData(venc,recor,k),status:k===0?st:'Aberto',comentario:obs,recorrencia:recor,recorrenciaGrupo:grupo});
-        (isR?DB.contasReceber:DB.contasPagar).push(row);
-      }
-      save();render();toast(recn+' lançamentos recorrentes criados');
+      const row=Object.assign({id:uid()},base,{valor:val,vencimento:venc,status:st,comentario:obs,recorrencia:recor,recorrenciaGrupo:grupo,recorrenciaTotal:recn});
+      (isR?DB.contasReceber:DB.contasPagar).push(row);
+      save();render();toast('Conta recorrente criada — as próximas aparecem a cada novo período');
     }else{
       const row=Object.assign({id:uid()},base,{valor:val,vencimento:venc,status:st,comentario:obs,recorrencia:''});
       (isR?DB.contasReceber:DB.contasPagar).push(row);
@@ -1802,6 +1800,40 @@ function deleteConta(tipo,id){const key=tipo==='receber'?'contasReceber':'contas
     }
   }
   DB[key]=DB[key].filter(x=>x.id!==id);save();render();closeOverlays();toast('Conta excluída')}
+function recorrenciasPendentes(){
+  const h=new Date().toISOString().slice(0,10);
+  const prox=(s,t,k)=>{const d=new Date(s);if(t==='semanal')d.setDate(d.getDate()+7*k);else if(t==='anual')d.setFullYear(d.getFullYear()+k);else d.setMonth(d.getMonth()+k);return d.toISOString().slice(0,10)};
+  const vencido=(nx,t)=> t==='mensal'? h.slice(0,7)>=nx.slice(0,7) : h>=nx;
+  const novos=[];
+  ['contasReceber','contasPagar'].forEach(key=>{
+    const grupos={};
+    (DB[key]||[]).forEach(c=>{if(c.recorrenciaGrupo&&c.recorrencia&&c.recorrenciaTotal){(grupos[c.recorrenciaGrupo]=grupos[c.recorrenciaGrupo]||[]).push(c)}});
+    Object.keys(grupos).forEach(g=>{
+      const rows=grupos[g].sort((a,b)=>a.vencimento.localeCompare(b.vencimento));
+      const tipo=rows[0].recorrencia, total=rows[0].recorrenciaTotal;
+      let count=rows.length, ultimo=rows[rows.length-1];
+      while(count<total){
+        const nx=prox(ultimo.vencimento,tipo,1);
+        if(!vencido(nx,tipo))break;
+        const row=Object.assign({},
+          key==='contasReceber'?{cliente:ultimo.cliente}:{descricao:ultimo.descricao,categoria:ultimo.categoria},
+          {id:uid(),valor:ultimo.valor,vencimento:nx,status:'Aberto',comentario:ultimo.comentario||'',recorrencia:tipo,recorrenciaGrupo:g,recorrenciaTotal:total});
+        novos.push({key:key,row:row,desc:(key==='contasReceber'?row.cliente:row.descricao)+' — '+fmtDate(nx)});
+        ultimo=row; count++;
+      }
+    });
+  });
+  return novos;
+}
+function checarRecorrencias(){
+  const pend=recorrenciasPendentes();
+  if(!pend.length)return;
+  const lista=pend.slice(0,8).map(p=>'• '+p.desc).join('\n')+(pend.length>8?'\n…e mais '+(pend.length-8):'');
+  if(confirm(pend.length+' lançamento(s) recorrente(s) chegaram ao período. Deseja criar agora?\n\n'+lista)){
+    pend.forEach(p=>DB[p.key].push(p.row));
+    save();render();toast(pend.length+' lançamento(s) recorrente(s) criado(s)');
+  }
+}
 function adjustSaldo(){
   openModal('Ajustar saldo',`<div class="field"><label>Valor do ajuste (R$)</label><input id="adj" type="number" placeholder="Ex.: 500 ou -300" value="0"></div>
     <div style="font-size:12px;color:var(--muted)">Use valores negativos para reduzir o saldo. O ajuste é somado ao saldo calculado. Ajuste atual acumulado: <b>${BRL(DB.saldoAjuste||0)}</b></div>`,
@@ -2553,6 +2585,7 @@ function openSetup(){
   try{session=localStorage.getItem('falcon_session')||null}catch(e){session=null}
   updateConnUI();
   if(loggedIn()) render(); else renderAuth();
+  if(loggedIn())setTimeout(checarRecorrencias,500);
   document.addEventListener('keydown',e=>{if(e.key==='Escape')closeOverlays()});
 })();
 </script>
