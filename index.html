@@ -1671,10 +1671,11 @@ function viewFinanceiro(v){
       <button class="btn btn-sm" onclick="exportFinanceCSV()">${ic('download')}Exportar CSV</button>
     </div>
 
-    <div class="kpis" style="grid-template-columns:repeat(4,1fr)">
+    <div class="kpis" style="grid-template-columns:repeat(5,1fr)">
       ${kpi('Receita prevista',BRL(m.prevista),'doc','Total no período',null)}
       ${kpi('Receita recebida',BRL(m.recebida),'money','Efetivamente pago',null)}
       ${kpi('Receita em aberto',BRL(m.aberta),'clock','A receber',null)}
+      ${kpi('Líquido do período',BRL(m.lucro),'trend','Recebido − despesas pagas',null,true)}
       ${kpi('Inadimplência',pct(m.inadPct),'warn',m.inadCount+' cliente(s) • '+BRL(m.atrasadoVal),null,false,true)}
     </div>
 
