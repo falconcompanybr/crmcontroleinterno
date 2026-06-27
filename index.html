@@ -1474,7 +1474,9 @@ function finMetrics(){
 }
 function finMonths(){
   const set=new Set();[...DB.contasReceber,...DB.contasPagar].forEach(c=>set.add(monthKey(c.vencimento)));
-  set.add(monthKey(daysAgo(0)));return [...set].sort().reverse();
+  const base=new Date(today);
+  for(let i=-12;i<=12;i++){const d=new Date(base.getFullYear(),base.getMonth()+i,1);set.add(d.toISOString().slice(0,7));}
+  return [...set].sort().reverse();
 }
 function finLabel(){
   if(finFilter.mode==='geral')return 'Todos os lançamentos';
