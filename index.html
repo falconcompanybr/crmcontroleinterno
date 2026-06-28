@@ -1,4 +1,4 @@
-  <meta charset="utf-8" />
+<meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -2174,15 +2174,24 @@
     if(status==='Implantação'&&ensureOperacao(c)){logEvent('Operações','Implantação iniciada: '+c.empresa,c.responsavel);}
     save();render();renderClientDrawer(id);toast('Status atualizado')}
   function saveClientNota(id,val){const c=DB.clients.find(x=>x.id===id);c.nota=val;save();toast('Nota salva')}
+  const TAG_SUGESTOES=['Ortodontia','Implante','Faceta','OrthoClub','HOF'];
   function tagsEditorHTML(kind,id,tags){
+    tags=tags||[];
+    const sugest=TAG_SUGESTOES.filter(t=>!tags.includes(t));
     return `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px">
-      ${(tags||[]).map(t=>`<span class="chip chip-acc" style="gap:5px">${t}<span onclick="removeTag('${kind}','${id}','${t.replace(/'/g,"")}')" style="cursor:pointer;font-weight:700;opacity:.6">×</span></span>`).join('')}
+      ${tags.map(t=>`<span class="chip chip-acc" style="gap:5px">${t}<span onclick="removeTag('${kind}','${id}','${t.replace(/'/g,"")}')" style="cursor:pointer;font-weight:700;opacity:.6">×</span></span>`).join('')}
       <input id="tagInput_${id}" placeholder="+ etiqueta" onkeydown="if(event.key==='Enter')addTag('${kind}','${id}')" style="border:1px dashed var(--border-2);border-radius:7px;padding:4px 9px;font-family:inherit;font-size:12px;width:110px;outline:none">
-    </div>`;
+    </div>
+    ${sugest.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+      ${sugest.map(t=>`<button type="button" class="chip chip-mut" style="border:none;cursor:pointer;gap:4px" onclick="addTagValue('${kind}','${id}','${t}')"><span style="font-weight:700;opacity:.7">+</span>${t}</button>`).join('')}
+    </div>`:''}`;
   }
   function _tagColl(kind){return kind==='cliente'?DB.clients:DB.leads}
   function addTag(kind,id){const inp=document.getElementById('tagInput_'+id);const v=(inp.value||'').trim();if(!v)return;
     const o=_tagColl(kind).find(x=>x.id===id);o.tags=o.tags||[];if(!o.tags.includes(v))o.tags.push(v);save();
+    if(kind==='cliente')renderClientDrawer(id);else openLead(id)}
+  function addTagValue(kind,id,val){val=(val||'').trim();if(!val)return;
+    const o=_tagColl(kind).find(x=>x.id===id);o.tags=o.tags||[];if(!o.tags.includes(val))o.tags.push(val);save();
     if(kind==='cliente')renderClientDrawer(id);else openLead(id)}
   function removeTag(kind,id,tag){const o=_tagColl(kind).find(x=>x.id===id);o.tags=(o.tags||[]).filter(t=>t!==tag);save();
     if(kind==='cliente')renderClientDrawer(id);else openLead(id)}
