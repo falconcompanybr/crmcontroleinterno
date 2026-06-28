@@ -1327,17 +1327,23 @@
   function viewClientes(v){
     const cls=vClients();
     if(!cls.length){v.innerHTML=emptyState('client','Nenhum cliente ainda','Cadastre sua carteira. Cada cliente tem um responsável e só ele (e o CEO) o vê.','Novo cliente','openClientForm()');return;}
+    const ativosN=cls.filter(c=>c.status!=='Cancelado').length;
+    const inativosN=cls.filter(c=>c.status==='Cancelado').length;
     v.innerHTML=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap"><div class="seg">
-        <button class="on" onclick="filterClient(this,'all')">Todos (${cls.length})</button>
+        <button class="on" onclick="filterClient(this,'all')">Todos (${ativosN})</button>
         <button onclick="filterClient(this,'Ativo')">Ativos</button>
         <button onclick="filterClient(this,'Implantação')">Implantação</button>
         <button onclick="filterClient(this,'Pausado')">Pausados</button>
-        <button onclick="filterClient(this,'Cancelado')">Cancelados</button></div>
+        <button onclick="filterClient(this,'Inativos')">Inativos${inativosN?' ('+inativosN+')':''}</button></div>
         <button class="btn btn-sm" style="margin-left:auto" onclick="exportClientsCSV()">${ic('download')}Exportar CSV</button></div>
       <div class="ccards" id="clientCards">${clientCards('all')}</div>`;
   }
   function clientCards(f){
-    let cs=vClients();if(f!=='all')cs=cs.filter(c=>c.status===f);
+    let cs=vClients();
+    if(f==='all')cs=cs.filter(c=>c.status!=='Cancelado');
+    else if(f==='Inativos')cs=cs.filter(c=>c.status==='Cancelado');
+    else cs=cs.filter(c=>c.status===f);
+    if(!cs.length)return `<div style="grid-column:1/-1" class="card"><div class="empty">${ic(f==='Inativos'?'hand':'client')}<div style="font-weight:600;color:var(--ink)">${f==='Inativos'?'Nenhum cliente inativo':'Nenhum cliente nesta aba'}</div><div style="margin-top:4px">${f==='Inativos'?'Contratos cancelados aparecem aqui.':'Troque de aba ou cadastre um novo cliente.'}</div></div></div>`;
     return cs.map(c=>{
       const hc=c.saude>=70?'#0E9D6B':c.saude>=45?'#F5B301':'#DD3A2F';
       const f=clientFinance(c);
@@ -1351,6 +1357,7 @@
           <span class="chip chip-${CST[c.status]}">${c.status}</span></div>
         <div style="display:flex;gap:14px;margin-top:12px;font-size:12px;color:var(--muted)">
           <span>${c.cidade}</span>·<span>${c.especialidade}</span></div>
+        ${c.status==='Cancelado'&&c.motivoCancel?`<div style="font-size:11.5px;color:var(--neg);margin-top:8px">⊘ ${c.motivoCancel}</div>`:''}
         <div style="display:flex;align-items:center;gap:8px;margin-top:11px">${payChip}
           <span style="font-size:11.5px;color:var(--muted)">Resp.: <b style="color:var(--text)">${c.responsavel||'—'}</b></span></div>
         ${(c.tags&&c.tags.length)?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">${c.tags.map(t=>`<span class="chip chip-acc" style="font-size:10px;padding:1px 6px">${t}</span>`).join('')}</div>`:''}
@@ -1367,6 +1374,12 @@
     const sum=s=>list.filter(x=>x.status===s).reduce((a,x)=>a+x.valor,0);
     return {list,recebido:sum('Pago'),aberto:sum('Aberto'),atrasado:sum('Atrasado'),
       previsto:list.filter(x=>x.status!=='Cancelado').reduce((a,x)=>a+x.valor,0)};
+  }
+  function diasAtrasoConta(x){
+    if(!x||!x.vencimento)return 0;
+    const ref = x.status==='Pago' ? (x.pagoEm||daysAgo(0)) : daysAgo(0);
+    const d=Math.round((new Date(ref)-new Date(x.vencimento))/864e5);
+    return d>0?d:0;
   }
   function filterClient(btn,f){btn.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('on'));btn.classList.add('on');
     document.getElementById('clientCards').innerHTML=clientCards(f)}
@@ -2123,14 +2136,24 @@
           <button class="btn" style="flex:1" onclick="addClientCharge('${id}')">${ic('plus')}Lançar cobrança</button></div>
         <label style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted-2);font-weight:600">Cobranças do cliente</label>
         <div style="margin-top:10px;border:1px solid var(--border);border-radius:12px;overflow:hidden">
-          ${f.list.length?[...f.list].sort((a,b)=>b.vencimento.localeCompare(a.vencimento)).map((x,i)=>`
-            <div style="display:flex;align-items:center;gap:10px;padding:11px 13px;${i?'border-top:1px solid var(--surface-3)':''}">
-              <div style="flex:1"><div class="mono-num" style="font-weight:600">${BRL(x.valor)}</div>
-                <div style="font-size:11.5px;color:var(--muted)">Venc. ${fmtDate(x.vencimento)}</div></div>
+          ${f.list.length?[...f.list].sort((a,b)=>b.vencimento.localeCompare(a.vencimento)).map((x,i)=>{
+            const atr=diasAtrasoConta(x);
+            const sub=atr>0?`<div style="font-size:11px;color:var(--neg);font-weight:600;margin-top:2px">${x.status==='Pago'?'Pago com '+atr+' dia(s) de atraso':'Vencida há '+atr+' dia(s)'}</div>`:'';
+            return `<div style="display:flex;align-items:center;gap:8px;padding:11px 13px;${i?'border-top:1px solid var(--surface-3)':''}">
+              <div style="flex:1;min-width:0"><div class="mono-num" style="font-weight:600">${BRL(x.valor)}</div>
+                <div style="font-size:11.5px;color:var(--muted)">Venc. ${fmtDate(x.vencimento)}${x.recorrencia?' · ↻':''}</div>${sub}</div>
               ${crStatus(x.status)}
               ${x.status!=='Pago'?`<button class="btn btn-sm" onclick="markClientContaPaid('${id}','${x.id}')">Receber</button>`:''}
-            </div>`).join(''):'<div style="padding:16px;text-align:center;color:var(--muted);font-size:12.5px">Nenhuma cobrança ainda.</div>'}</div>
+              <button class="btn btn-sm btn-ghost" title="Excluir parcela" style="color:var(--neg);padding:5px 7px" onclick="deleteClientConta('${id}','${x.id}')">${ic('trash')}</button>
+            </div>`;}).join(''):'<div style="padding:16px;text-align:center;color:var(--muted);font-size:12.5px">Nenhuma cobrança ainda.</div>'}</div>
         <div style="font-size:11.5px;color:var(--muted-2);margin-top:11px;line-height:1.45">Tudo que você registrar aqui atualiza automaticamente a aba <b>Financeiro</b> (contas a receber, inadimplência e fluxo de caixa).</div>
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--surface-3)">
+          ${c.status==='Cancelado'
+            ? `<button class="btn" style="width:100%;justify-content:center;color:var(--pos);border-color:var(--pos-soft)" onclick="setClientStatus('${id}','Ativo')">${ic('check')}Reativar contrato</button>`
+            : `<button class="btn" style="width:100%;justify-content:center;color:var(--neg);border-color:var(--neg-soft)" onclick="setClientStatus('${id}','Cancelado')">${ic('hand')}Cancelar contrato</button>`}
+          ${c.status==='Cancelado'&&c.motivoCancel?`<div style="font-size:11.5px;color:var(--neg);margin-top:8px;text-align:center">Motivo: ${c.motivoCancel}</div>`
+            :`<div style="font-size:11px;color:var(--muted-2);margin-top:7px;text-align:center;line-height:1.4">Ao cancelar, o cliente vai para a aba <b>Inativos</b>. Você pode reativar quando quiser.</div>`}
+        </div>
       </div>`;
     } else {
       body=`<div class="dw-b">
@@ -2230,9 +2253,11 @@
     const c=DB.clients.find(x=>x.id===id);
     const open=DB.contasReceber.filter(x=>x.cliente===c.empresa&&x.status!=='Pago'&&x.status!=='Cancelado')
       .sort((a,b)=>a.vencimento.localeCompare(b.vencimento))[0];
-    if(open){open.status='Pago';clientLog(c,'Pagamento','Pagamento de '+BRL(open.valor)+' recebido (venc. '+fmtDate(open.vencimento)+').');}
-    else{DB.contasReceber.push({id:uid(),cliente:c.empresa,valor:c.contrato.mensal,vencimento:daysAgo(0),status:'Pago'});
-      clientLog(c,'Pagamento','Pagamento avulso de '+BRL(c.contrato.mensal)+' registrado.');}
+    if(open){open.status='Pago';open.pagoEm=daysAgo(0);const atr=diasAtrasoConta(open);
+      clientLog(c,'Pagamento','Pagamento de '+BRL(open.valor)+' recebido (venc. '+fmtDate(open.vencimento)+')'+(atr>0?' com '+atr+' dia(s) de atraso':' em dia')+'.');
+      save();renderClientDrawer(id);toast(atr>0?'Pago com '+atr+' dia(s) de atraso':'Pagamento registrado e refletido no Financeiro');return;}
+    DB.contasReceber.push({id:uid(),cliente:c.empresa,valor:c.contrato.mensal,vencimento:daysAgo(0),status:'Pago',pagoEm:daysAgo(0),responsavel:c.responsavel});
+    clientLog(c,'Pagamento','Pagamento avulso de '+BRL(c.contrato.mensal)+' registrado.');
     save();renderClientDrawer(id);toast('Pagamento registrado e refletido no Financeiro');
   }
   function addClientCharge(id){
@@ -2278,8 +2303,24 @@
   }
   function markClientContaPaid(id,contaId){
     const c=DB.clients.find(x=>x.id===id);const x=DB.contasReceber.find(y=>y.id===contaId);
-    x.status='Pago';clientLog(c,'Pagamento','Pagamento de '+BRL(x.valor)+' recebido.');
-    save();renderClientDrawer(id);toast('Pagamento registrado');
+    x.status='Pago';x.pagoEm=daysAgo(0);const atr=diasAtrasoConta(x);
+    clientLog(c,'Pagamento','Pagamento de '+BRL(x.valor)+' recebido'+(atr>0?' com '+atr+' dia(s) de atraso':' em dia')+'.');
+    save();renderClientDrawer(id);toast(atr>0?'Pago com '+atr+' dia(s) de atraso':'Pagamento registrado');
+  }
+  function deleteClientConta(id,contaId){
+    const c=DB.clients.find(x=>x.id===id);
+    const x=DB.contasReceber.find(y=>y.id===contaId);if(!x)return;
+    if(x.recorrenciaGrupo){
+      const fut=DB.contasReceber.filter(y=>y.recorrenciaGrupo===x.recorrenciaGrupo&&y.vencimento>=x.vencimento&&y.id!==contaId).length;
+      if(fut>0&&confirm('Esta parcela é recorrente. Excluir também as '+fut+' parcela(s) seguinte(s)?\n\nOK = excluir esta e as futuras • Cancelar = só esta')){
+        DB.contasReceber=DB.contasReceber.filter(y=>!(y.recorrenciaGrupo===x.recorrenciaGrupo&&y.vencimento>=x.vencimento));
+        clientLog(c,'Cobrança',(fut+1)+' parcela(s) recorrente(s) excluída(s).');
+        save();renderClientDrawer(id);toast('Parcelas excluídas');return;
+      }
+    }
+    DB.contasReceber=DB.contasReceber.filter(y=>y.id!==contaId);
+    clientLog(c,'Cobrança','Parcela de '+BRL(x.valor)+' (venc. '+fmtDate(x.vencimento)+') excluída.');
+    save();renderClientDrawer(id);toast('Parcela excluída');
   }
   function addClientComment(id){const i=document.getElementById('cliComment');const v=i.value.trim();if(!v)return;
     const c=DB.clients.find(x=>x.id===id);clientLog(c,'Comentário',v);save();renderClientDrawer(id);toast('Comentário registrado')}
