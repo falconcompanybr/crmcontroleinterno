@@ -2239,12 +2239,42 @@
     const c=DB.clients.find(x=>x.id===id);
     openModal('Lançar cobrança',`
       <div class="frow2"><div class="field"><label>Valor (R$)</label><input id="cc_val" type="number" value="${c.contrato.mensal}"></div>
-        <div class="field"><label>Vencimento</label><input id="cc_venc" type="date" value="${daysAhead(5)}"></div></div>
-      <div class="field"><label>Status</label><select id="cc_st"><option>Aberto</option><option>Pago</option><option>Atrasado</option></select></div>`,
-      ()=>{const val=Number(document.getElementById('cc_val').value||0),venc=document.getElementById('cc_venc').value,st=document.getElementById('cc_st').value;
-        DB.contasReceber.push({id:uid(),cliente:c.empresa,valor:val,vencimento:venc,status:st});
-        clientLog(c,'Cobrança','Cobrança de '+BRL(val)+' lançada (venc. '+fmtDate(venc)+', '+st+').');
-        save();clientTab='financeiro';renderClientDrawer(id);toast('Cobrança lançada no Financeiro')});
+        <div class="field"><label>Vencimento</label><input id="cc_venc" type="date" value="${daysAhead(1)}"></div></div>
+      <div class="field"><label>Status</label><select id="cc_st"><option>Aberto</option><option>Pago</option><option>Atrasado</option></select></div>
+      <div class="frow2"><div class="field"><label>Recorrência</label>
+        <select id="cc_recor" onchange="document.getElementById('cc_recwrap').style.display=this.value==='nenhuma'?'none':'block'">
+          <option value="nenhuma">Não recorrente</option>
+          <option value="semanal">Toda semana</option>
+          <option value="mensal" selected>Todo mês</option>
+          <option value="anual">Todo ano</option></select></div>
+        <div class="field" id="cc_recwrap" style="display:none"><label>Quantas cobranças</label><input id="cc_recn" type="number" min="1" value="12"></div></div>
+      <div style="font-size:11.5px;color:var(--muted-2);margin:-4px 0 4px;line-height:1.4">Na recorrência, o sistema já cria todas as cobranças de uma vez — mantendo o dia do vencimento e avançando só o mês/ano. Depois é só marcar "Receber" em cada uma.</div>`,
+      ()=>{
+        const val=Number(document.getElementById('cc_val').value||0),venc=document.getElementById('cc_venc').value,st=document.getElementById('cc_st').value;
+        const recor=document.getElementById('cc_recor').value;
+        if(recor==='nenhuma'){
+          DB.contasReceber.push({id:uid(),cliente:c.empresa,valor:val,vencimento:venc,status:st,responsavel:c.responsavel});
+          clientLog(c,'Cobrança','Cobrança de '+BRL(val)+' lançada (venc. '+fmtDate(venc)+', '+st+').');
+          save();clientTab='financeiro';renderClientDrawer(id);toast('Cobrança lançada no Financeiro');
+          return;
+        }
+        const n=Math.max(1,Number(document.getElementById('cc_recn').value||0));
+        const prox=(s,t,k)=>{const [Y,M,D]=s.split('-').map(Number);
+          if(t==='semanal'){const d=new Date(Date.UTC(Y,M-1,D));d.setUTCDate(d.getUTCDate()+7*k);return d.toISOString().slice(0,10);}
+          let y=Y,mo=(M-1)+(t==='anual'?0:k);if(t==='anual')y+=k;
+          y+=Math.floor(mo/12);mo=((mo%12)+12)%12;
+          const ultimoDia=new Date(Date.UTC(y,mo+1,0)).getUTCDate();
+          return new Date(Date.UTC(y,mo,Math.min(D,ultimoDia))).toISOString().slice(0,10);};
+        const grupo=uid();
+        for(let k=0;k<n;k++){
+          DB.contasReceber.push({id:uid(),cliente:c.empresa,valor:val,vencimento:prox(venc,recor,k),
+            status:k===0?st:'Aberto',responsavel:c.responsavel,
+            recorrencia:recor,recorrenciaGrupo:grupo,recorrenciaTotal:n});
+        }
+        const labelR={semanal:'semanal',mensal:'mensal',anual:'anual'}[recor];
+        clientLog(c,'Cobrança',n+' cobrança(s) '+labelR+'(is) de '+BRL(val)+' criada(s), a partir de '+fmtDate(venc)+'.');
+        save();clientTab='financeiro';renderClientDrawer(id);toast(n+' cobrança(s) recorrente(s) criada(s)');
+      });
   }
   function markClientContaPaid(id,contaId){
     const c=DB.clients.find(x=>x.id===id);const x=DB.contasReceber.find(y=>y.id===contaId);
