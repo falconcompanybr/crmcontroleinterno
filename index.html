@@ -411,9 +411,16 @@
   const LOGO_COLORS=['#2D6BE0','#0E9D6B','#E08A12','#8B5CF6','#DD3A2F','#0891B2','#DB2777','#475569'];
   const colorFor = s => LOGO_COLORS[[...s].reduce((a,c)=>a+c.charCodeAt(0),0)%LOGO_COLORS.length];
   const uid = ()=> 'id'+Math.random().toString(36).slice(2,9);
-  const today = new Date('2026-06-22');
+  // Relógio real do dispositivo (data local, sem fuso atrapalhar). Atualiza sozinho ao virar o dia.
+  function realToday(){const d=new Date();return new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()))}
+  let today = realToday();
+  function tickClock(){const nv=realToday();if(nv.getTime()!==today.getTime()){today=nv;if(typeof loggedIn==='function'&&loggedIn()&&typeof render==='function')render();}}
+  setInterval(tickClock,60000); // verifica a cada minuto se o dia mudou
   function daysAgo(n){const d=new Date(today);d.setDate(d.getDate()-n);return d.toISOString().slice(0,10)}
   function daysAhead(n){const d=new Date(today);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)}
+  function todayStr(){return today.toISOString().slice(0,10)}
+  function firstOfMonth(s){const x=s||todayStr();return x.slice(0,7)+'-01'}
+  function lastOfMonth(s){const x=s||todayStr();const [y,m]=x.split('-').map(Number);return new Date(Date.UTC(y,m,0)).toISOString().slice(0,10)}
   function fmtDate(s){if(!s)return '—';const [y,m,d]=s.split('-');return `${d}/${m}/${y.slice(2)}`}
   function nowISO(){return new Date().toISOString()}
   function fmtDT(iso){const d=new Date(iso);if(isNaN(d))return iso;return d.toLocaleDateString('pt-BR')+' às '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}
@@ -698,7 +705,8 @@
     if(!DB.series){DB.series=emptyDB().series;changed=true}
     if(!DB.perfil){DB.perfil={nome:'',empresa:''};changed=true}
     if(!DB.log){DB.log=[];changed=true}
-    if(!DB.metas){DB.metas={leads:0,fechamentos:0,mrr:0};changed=true}
+    if(!DB.metas){DB.metas={leads:0,fechamentos:0,mrr:0,inicio:firstOfMonth(),fim:lastOfMonth()};changed=true}
+    if(DB.metas&&!DB.metas.inicio){DB.metas.inicio=firstOfMonth();DB.metas.fim=lastOfMonth();changed=true}
     if(!DB.operacoes){DB.operacoes=[];changed=true}
     if(!DB.metasFech){DB.metasFech={};changed=true}
     if(!DB.painel){DB.painel={};changed=true}
@@ -1006,32 +1014,52 @@
   }
   function metasHTML(m){
     const meta=DB.metas||{leads:0,fechamentos:0,mrr:0};
+    const ini=meta.inicio||firstOfMonth(), fim=meta.fim||lastOfMonth();
     const has=meta.leads>0||meta.fechamentos>0||meta.mrr>0;
-    if(!has){return canSeeAll()?`<div class="sec-title">Metas do mês</div>
+    if(!has){return canSeeAll()?`<div class="sec-title">Metas do período</div>
       <div class="card" style="padding:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-        <div style="flex:1;min-width:200px;color:var(--muted);font-size:13px">Defina metas de leads, fechamentos e MRR para acompanhar o progresso do mês.</div>
+        <div style="flex:1;min-width:200px;color:var(--muted);font-size:13px">Defina metas de leads, fechamentos e MRR e o período em que valem. O sistema acompanha o progresso e o tempo sozinho.</div>
         <button class="btn btn-acc btn-sm" onclick="openMetas()">${ic('plus')}Definir metas</button></div>`:'';}
-    const cm=monthKey(daysAgo(0));
-    const leadsMes=vLeads().filter(l=>monthKey(l.criado||l.stageSince)===cm).length;
-    const fechMes=vClients().filter(c=>c.closedAt&&monthKey(c.closedAt)===cm).length;
+    const hoje=todayStr();
+    const inRange=d=>d&&d>=ini&&d<=fim;
+    const leadsP=vLeads().filter(l=>inRange(l.criado||l.stageSince)).length;
+    const fechP=vClients().filter(c=>inRange(c.closedAt)).length;
+    // status temporal calculado pelo relógio real
+    const diaMs=864e5;
+    let statusChip, statusCor;
+    if(hoje<ini){const d=Math.round((new Date(ini)-new Date(hoje))/diaMs);statusCor='var(--info)';statusChip='começa em '+d+' dia(s)';}
+    else if(hoje>fim){const d=Math.round((new Date(hoje)-new Date(fim))/diaMs);statusCor='var(--muted)';statusChip='encerrada há '+d+' dia(s)';}
+    else {const d=Math.round((new Date(fim)-new Date(hoje))/diaMs);statusCor=d<=3?'var(--warn)':'var(--pos)';statusChip=d===0?'último dia':'faltam '+d+' dia(s)';}
+    const encerrada=hoje>fim;
     const bar=(lbl,val,goal,fmt)=>{const p=goal?Math.min(100,Math.round(val/goal*100)):0;const c=p>=100?'#0E9D6B':p>=60?'#F5B301':'#2D6BE0';
       return `<div style="flex:1;min-width:200px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
         <span style="color:var(--muted);font-weight:500">${lbl}</span><span class="mono-num" style="font-weight:600">${fmt(val)} / ${fmt(goal)} <span style="color:${c}">(${p}%)</span></span></div>
         <div style="height:9px;background:var(--surface-3);border-radius:9px;overflow:hidden"><i style="display:block;height:100%;width:${p}%;background:${c};border-radius:9px"></i></div></div>`;}
-    return `<div class="sec-title">Metas do mês ${canSeeAll()?`<button class="btn btn-sm btn-ghost" style="margin-left:auto" onclick="openMetas()">${ic('edit')}Editar</button>`:''}</div>
-      <div class="card" style="padding:18px;display:flex;gap:26px;flex-wrap:wrap">
-        ${bar('Leads no mês',leadsMes,meta.leads,x=>x)}
-        ${bar('Fechamentos',fechMes,meta.fechamentos,x=>x)}
-        ${bar('MRR',m.mrr,meta.mrr,x=>BRLk(x))}
-      </div>`;
+    return `<div class="sec-title">Metas do período ${canSeeAll()?`<button class="btn btn-sm btn-ghost" style="margin-left:auto" onclick="openMetas()">${ic('edit')}Editar</button>`:''}</div>
+      <div class="card" style="padding:18px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+          <span style="font-size:12.5px;color:var(--muted)">${ic('cal')} ${fmtDate(ini)} → ${fmtDate(fim)}</span>
+          <span class="chip" style="background:${statusCor}1a;color:${statusCor}">${statusChip}</span>
+          ${encerrada&&canSeeAll()?`<button class="btn btn-sm btn-acc" style="margin-left:auto" onclick="openMetas()">${ic('plus')}Nova meta</button>`:''}</div>
+        <div style="display:flex;gap:26px;flex-wrap:wrap">
+          ${bar('Leads no período',leadsP,meta.leads,x=>x)}
+          ${bar('Fechamentos',fechP,meta.fechamentos,x=>x)}
+          ${bar('MRR',m.mrr,meta.mrr,x=>BRLk(x))}
+        </div></div>`;
   }
   function openMetas(){
     const meta=DB.metas||{leads:0,fechamentos:0,mrr:0};
-    openModal('Metas do mês',`
-      <div class="field"><label>Meta de leads no mês</label><input id="mt_leads" type="number" value="${meta.leads||0}"></div>
+    const ini=meta.inicio||firstOfMonth(), fim=meta.fim||lastOfMonth();
+    openModal('Metas do período',`
+      <div class="frow2"><div class="field"><label>Início da meta</label><input id="mt_ini" type="date" value="${ini}"></div>
+        <div class="field"><label>Fim da meta</label><input id="mt_fim" type="date" value="${fim}"></div></div>
+      <div style="font-size:11.5px;color:var(--muted-2);margin:-4px 0 12px;line-height:1.4">O sistema usa o relógio real do dispositivo para saber, sozinho, quando a meta começa e quando termina — você não precisa clicar em nada.</div>
+      <div class="field"><label>Meta de leads no período</label><input id="mt_leads" type="number" value="${meta.leads||0}"></div>
       <div class="field"><label>Meta de fechamentos</label><input id="mt_fech" type="number" value="${meta.fechamentos||0}"></div>
       <div class="field"><label>Meta de MRR (R$)</label><input id="mt_mrr" type="number" value="${meta.mrr||0}"></div>`,
-      ()=>{DB.metas={leads:Number(document.getElementById('mt_leads').value||0),fechamentos:Number(document.getElementById('mt_fech').value||0),mrr:Number(document.getElementById('mt_mrr').value||0)};
+      ()=>{let i=document.getElementById('mt_ini').value||firstOfMonth(),f=document.getElementById('mt_fim').value||lastOfMonth();
+        if(f<i){const t=i;i=f;f=t;}
+        DB.metas={leads:Number(document.getElementById('mt_leads').value||0),fechamentos:Number(document.getElementById('mt_fech').value||0),mrr:Number(document.getElementById('mt_mrr').value||0),inicio:i,fim:f};
         save();render();toast('Metas atualizadas')});
   }
   function kpi(lbl,val,icon,foot,delta,hl,neg){
