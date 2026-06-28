@@ -955,12 +955,24 @@
       </div>`;
     drawCharts();
   }
+  function cobrancasAVencer(dias){
+    // cobranças em aberto vencendo nos próximos `dias` dias OU já vencidas
+    dias=dias||10;
+    const hoje=daysAgo(0);
+    const limite=daysAhead(dias);
+    return vContasReceber()
+      .filter(c=>(c.status==='Aberto'||c.status==='Atrasado')&&c.vencimento<=limite)
+      .map(c=>{const d=Math.round((new Date(c.vencimento)-new Date(hoje))/864e5);return Object.assign({},c,{diasRestantes:d});})
+      .sort((a,b)=>a.vencimento.localeCompare(b.vencimento));
+  }
   function meuDiaHTML(){
     const hoje=daysAgo(0);
     const tHoje=vTarefas().filter(t=>t.status!=='Concluída'&&t.prazo===hoje).length;
     const tAtras=vTarefas().filter(t=>t.status==='Atrasada'||(t.status!=='Concluída'&&t.prazo<hoje)).length;
     const cHoje=vAgenda().filter(a=>a.data===hoje).length;
     const parados=vLeads().filter(l=>l.stage!=='perdidos'&&daysInStage(l)>=14).length;
+    const venc=cobrancasAVencer(10);
+    const vencidas=venc.filter(c=>c.diasRestantes<0).length;
     const card=(cor,icone,num,lbl,sub,onclick)=>`<div onclick="${onclick}" style="flex:1;min-width:150px;cursor:pointer;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;box-shadow:var(--shadow);display:flex;align-items:center;gap:12px">
       <div style="width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:${cor}1a;color:${cor}">${ic(icone)}</div>
       <div><div class="mono-num" style="font-size:21px;font-weight:600;color:var(--ink);line-height:1">${num}</div><div style="font-size:11.5px;color:var(--muted);margin-top:2px">${lbl}</div></div>
@@ -970,7 +982,27 @@
         ${card('#2D6BE0','task',tHoje,'Tarefas para hoje',tAtras?tAtras+' atrasada(s)':'',"goTask('all')")}
         ${card('#8B5CF6','cal',cHoje,'Compromissos hoje','',"go('agenda')")}
         ${card('#E08A12','clock',parados,'Leads parados +14d','',"go('pipeline')")}
-      </div>`;
+        ${card('#0E9D6B','money',venc.length,'Cobranças vencendo (10d)',vencidas?vencidas+' vencida(s)':'',"go('financeiro')")}
+      </div>
+      ${venc.length?cobrancasAVencerHTML(venc):''}`;
+  }
+  function cobrancasAVencerHTML(venc){
+    const row=c=>{
+      const d=c.diasRestantes;
+      const cor=d<0?'#DD3A2F':d<=3?'#E08A12':'#0E9D6B';
+      const lbl=d<0?'venceu há '+Math.abs(d)+' dia(s)':d===0?'vence hoje':'faltam '+d+' dia(s)';
+      return `<div style="display:flex;align-items:center;gap:11px;padding:11px 16px;border-bottom:1px solid var(--surface-3)">
+        <div class="logo" style="width:32px;height:32px;border-radius:9px;font-size:12px;background:${colorFor(c.cliente||'?')}">${initials(c.cliente||'?')}</div>
+        <div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:600;color:var(--ink)">${c.cliente}</div>
+          <div style="font-size:11.5px;color:var(--muted)">Venc. ${fmtDate(c.vencimento)}</div></div>
+        <div class="mono-num" style="font-weight:600;font-size:13.5px">${BRL(c.valor)}</div>
+        <span class="chip" style="background:${cor}1a;color:${cor};min-width:96px;justify-content:center">${lbl}</span></div>`;
+    };
+    return `<div class="card" style="margin-top:14px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:8px;padding:13px 16px;border-bottom:1px solid var(--border)">
+        <h3 style="font-size:14px">Pagamentos a vencer</h3>
+        <span class="sub" style="margin-left:auto;color:var(--muted);font-size:11.5px">próximos 10 dias e em atraso</span></div>
+      ${venc.map(row).join('')}</div>`;
   }
   function metasHTML(m){
     const meta=DB.metas||{leads:0,fechamentos:0,mrr:0};
@@ -1038,6 +1070,12 @@
         <div style="flex:1"><div class="at">${a[2]}</div><div class="ad">${a[3]}</div></div><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="var(--muted-2)" stroke-width="2" style="align-self:center"><path d="M9 18l6-6-6-6"/></svg></div>`).join('');
     }
     if(m.inadPct>5)A.push(['neg','warn','Inadimplência elevada',`${pct(m.inadPct)} da receita em atraso (${BRL(m.atrasadoVal)}).`,"go('financeiro')"]);
+    const venc10=cobrancasAVencer(10);
+    if(venc10.length){
+      const prox=venc10.find(c=>c.diasRestantes>=0);
+      const det=prox?(prox.cliente+(prox.diasRestantes===0?' vence hoje':' em '+prox.diasRestantes+'d')):'algumas já vencidas';
+      A.push(['warn','money',`${venc10.length} cobrança(s) vencendo em até 10 dias`,`Próxima: ${det}. Toque para ver no Financeiro.`,"go('financeiro')"]);
+    }
     const atras=vTarefas().filter(t=>t.status==='Atrasada').length;
     if(atras)A.push(['warn','clock',`${atras} tarefa(s) atrasada(s)`,'Toque para ver as tarefas em aberto.',"goTask('Atrasada')"]);
     if(vLeads().length && m.txCompar<70)A.push(['warn','down','Comparecimento abaixo da meta',`Taxa atual em ${pct(m.txCompar)} (meta 70%).`,"go('pipeline')"]);
